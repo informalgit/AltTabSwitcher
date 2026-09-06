@@ -26,57 +26,67 @@ using System.Windows.Forms;
 
 namespace AltTabSwitcher
 {
-    static class Program
+    // ================= Win32 interop =================
+    // Every P/Invoke declaration, Win32 constant, struct and COM import,
+    // gathered into one place (the NativeMethods role in a multi-file
+    // project) so the rest of the file is plain C#. Same single file,
+    // so the csc one-liner in build.bat keeps working unchanged.
+    static class NativeMethods
     {
         // ================= Win32 =================
-        delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
-        delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
-        const int WH_KEYBOARD_LL = 13;
-        const int WH_MOUSE_LL = 14;
-        const uint LLKHF_UP = 0x80;
-        const int WM_LBUTTONDOWN = 0x0201;
-        const int WM_MOUSEWHEEL = 0x020A;
-        const int VK_TAB = 0x09;
-        const int VK_MENU = 0x12;
-        const int VK_LMENU = 0xA4;
-        const int VK_RMENU = 0xA5;
-        const int VK_LWIN = 0x5B;
-        const int VK_RWIN = 0x5C;
-        const int VK_SHIFT = 0x10;
-        const int VK_ESCAPE = 0x1B;
-        const int GWL_EXSTYLE = -20;
-        const int WS_EX_TOOLWINDOW = 0x00000080;
-        const int WS_EX_APPWINDOW = 0x00040000;
-        const int WS_EX_NOACTIVATE = 0x08000000;
-        const int WS_EX_TOPMOST = 0x00000008;
-        const int WS_EX_LAYERED = 0x00080000;
-        const uint GW_OWNER = 4;
-        const uint GA_ROOTOWNER = 2;
-        const int GCLP_HICONSM = -34;
-        const int GCLP_HICON = -14;
-        const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
-        const uint MONITOR_DEFAULTTONEAREST = 2;
-        const int MDT_EFFECTIVE_DPI = 0;
-        const int SW_RESTORE = 9;
-        const uint SHGFI_ICON = 0x100;
-        const uint SHGFI_LARGEICON = 0x0;
-        const uint SHGFI_USEFILEATTRIBUTES = 0x10;
-        const int ULW_ALPHA = 2;
-        const byte AC_SRC_OVER = 0, AC_SRC_ALPHA = 1;
-        const int ICON_SMALL2 = 2, ICON_BIG = 1;
-        const uint WM_GETICON = 0x7F;
-        const uint SMTO_ABORTIFHUNG = 0x2;
+        public const int WH_KEYBOARD_LL = 13;
+        public const int WH_MOUSE_LL = 14;
+        public const uint LLKHF_UP = 0x80;
+        public const int WM_LBUTTONDOWN = 0x0201;
+        public const int WM_MOUSEWHEEL = 0x020A;
+        public const int VK_TAB = 0x09;
+        public const int VK_MENU = 0x12;
+        public const int VK_LMENU = 0xA4;
+        public const int VK_RMENU = 0xA5;
+        // No physical keyboard has F24 and no app binds it: the perfect
+        // harmless keystroke for staking a last-input claim (see
+        // StakeInputClaim).
+        public const byte VK_F24 = 0x87;
+        public const uint KEYEVENTF_KEYUP = 0x0002;
+        public const int VK_LWIN = 0x5B;
+        public const int VK_RWIN = 0x5C;
+        public const int VK_SHIFT = 0x10;
+        public const int VK_ESCAPE = 0x1B;
+        public const int GWL_EXSTYLE = -20;
+        public const int WS_EX_TOOLWINDOW = 0x00000080;
+        public const int WS_EX_APPWINDOW = 0x00040000;
+        public const int WS_EX_NOACTIVATE = 0x08000000;
+        public const int WS_EX_TOPMOST = 0x00000008;
+        public const int WS_EX_LAYERED = 0x00080000;
+        public const uint GW_OWNER = 4;
+        public const uint GA_ROOTOWNER = 2;
+        public const int GCLP_HICONSM = -34;
+        public const int GCLP_HICON = -14;
+        public const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+        public const uint MONITOR_DEFAULTTONEAREST = 2;
+        public const int MDT_EFFECTIVE_DPI = 0;
+        public const int SW_RESTORE = 9;
+        public const uint SHGFI_ICON = 0x100;
+        public const uint SHGFI_LARGEICON = 0x0;
+        public const uint SHGFI_USEFILEATTRIBUTES = 0x10;
+        public const int ULW_ALPHA = 2;
+        public const byte AC_SRC_OVER = 0, AC_SRC_ALPHA = 1;
+        public const int ICON_SMALL2 = 2, ICON_BIG = 1;
+        public const uint WM_GETICON = 0x7F;
+        public const uint SMTO_ABORTIFHUNG = 0x2;
 
-        const int WM_APP_START = 0x8000 + 1;
-        const int WM_APP_NEXT = 0x8000 + 2;
-        const int WM_APP_PREV = 0x8000 + 3;
-        const int WM_APP_COMMIT = 0x8000 + 4;
-        const int WM_APP_CANCEL = 0x8000 + 5;
-        const int WM_APP_COMMITAT = 0x8000 + 6;
+        public const int WM_APP_START = 0x8000 + 1;
+        public const int WM_APP_NEXT = 0x8000 + 2;
+        public const int WM_APP_PREV = 0x8000 + 3;
+        public const int WM_APP_COMMIT = 0x8000 + 4;
+        public const int WM_APP_CANCEL = 0x8000 + 5;
+        public const int WM_APP_COMMITAT = 0x8000 + 6;
 
         [StructLayout(LayoutKind.Sequential)]
-        struct KBDLLHOOKSTRUCT
+        public struct KBDLLHOOKSTRUCT
         {
             public uint vkCode;
             public uint scanCode;
@@ -86,7 +96,7 @@ namespace AltTabSwitcher
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        struct MSLLHOOKSTRUCT
+        public struct MSLLHOOKSTRUCT
         {
             public POINT pt;
             public uint mouseData;
@@ -99,10 +109,10 @@ namespace AltTabSwitcher
         public struct POINT { public int X, Y; }
 
         [StructLayout(LayoutKind.Sequential)]
-        struct RECT { public int Left, Top, Right, Bottom; }
+        public struct RECT { public int Left, Top, Right, Bottom; }
 
         [StructLayout(LayoutKind.Sequential)]
-        struct MONITORINFO
+        public struct MONITORINFO
         {
             public int cbSize;
             public RECT rcMonitor;
@@ -111,7 +121,7 @@ namespace AltTabSwitcher
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        struct DWM_THUMBNAIL_PROPERTIES
+        public struct DWM_THUMBNAIL_PROPERTIES
         {
             public uint dwFlags;
             public RECT rcDestination;
@@ -122,7 +132,7 @@ namespace AltTabSwitcher
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-        struct SHFILEINFOW
+        public struct SHFILEINFOW
         {
             public IntPtr hIcon;
             public int iIcon;
@@ -132,7 +142,7 @@ namespace AltTabSwitcher
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        struct BITMAPINFOHEADER
+        public struct BITMAPINFOHEADER
         {
             public int biSize;
             public int biWidth;
@@ -148,152 +158,163 @@ namespace AltTabSwitcher
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        struct BLENDFUNCTION
+        public struct BLENDFUNCTION
         {
             public byte BlendOp, BlendFlags, SourceConstantAlpha, AlphaFormat;
         }
 
         [DllImport("user32.dll", SetLastError = true)]
-        static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+        public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
         [DllImport("user32.dll", SetLastError = true)]
-        static extern bool UnhookWindowsHookEx(IntPtr hhk);
+        public static extern bool UnhookWindowsHookEx(IntPtr hhk);
         [DllImport("user32.dll")]
-        static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+        public static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-        static extern IntPtr GetModuleHandle(string lpModuleName);
+        public static extern IntPtr GetModuleHandle(string lpModuleName);
         [DllImport("user32.dll")]
-        static extern IntPtr GetForegroundWindow();
+        public static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")]
-        static extern short GetAsyncKeyState(int vKey);
+        public static extern short GetAsyncKeyState(int vKey);
         [DllImport("user32.dll")]
-        static extern bool IsWindowVisible(IntPtr hWnd);
+        public static extern bool IsWindowVisible(IntPtr hWnd);
         [DllImport("user32.dll")]
-        static extern bool IsIconic(IntPtr hWnd);
+        public static extern bool IsIconic(IntPtr hWnd);
         [DllImport("user32.dll")]
-        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
         [DllImport("user32.dll")]
-        static extern bool SetForegroundWindow(IntPtr hWnd);
+        public static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("user32.dll")]
-        static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+        public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")]
-        static extern bool BringWindowToTop(IntPtr hWnd);
+        public static extern bool BringWindowToTop(IntPtr hWnd);
         [DllImport("user32.dll")]
-        static extern bool SetFocus(IntPtr hWnd);
+        public static extern bool SetFocus(IntPtr hWnd);
         [DllImport("user32.dll")]
-        static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
         [DllImport("user32.dll")]
-        static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr lpdwProcessId);
+        public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr lpdwProcessId);
         [DllImport("user32.dll")]
-        static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+        public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
         [DllImport("kernel32.dll")]
-        static extern uint GetCurrentThreadId();
+        public static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")]
-        static extern IntPtr GetWindow(IntPtr hWnd, uint nCmd);
+        public static extern IntPtr GetWindow(IntPtr hWnd, uint nCmd);
         [DllImport("user32.dll")]
-        static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+        public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
         [DllImport("user32.dll")]
-        static extern IntPtr GetLastActivePopup(IntPtr hwnd);
+        public static extern IntPtr GetLastActivePopup(IntPtr hwnd);
         [DllImport("user32.dll")]
-        static extern bool IsWindow(IntPtr hWnd);
+        public static extern bool IsWindow(IntPtr hWnd);
         [DllImport("user32.dll")]
-        static extern bool SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+        public static extern bool SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
         [DllImport("gdi32.dll")]
-        static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int w, int h);
+        public static extern IntPtr CreateRoundRectRgn(int x1, int y1, int x2, int y2, int w, int h);
         [DllImport("gdi32.dll")]
-        static extern bool DeleteObject(IntPtr hObject);
+        public static extern bool DeleteObject(IntPtr hObject);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongW")]
-        static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+        public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll", EntryPoint = "GetClassLongW")]
-        static extern int GetClassLong(IntPtr hWnd, int nIndex);
+        public static extern int GetClassLong(IntPtr hWnd, int nIndex);
+        // GetClassLongW truncates an HICON to 32 bits on x64; always use the
+        // pointer-sized variant for icon handles.
+        [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")]
+        public static extern IntPtr GetClassLongPtr(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll")]
+        public static extern IntPtr CopyIcon(IntPtr hIcon);
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetParent(IntPtr hWnd);
+        // Undocumented but shipped since Windows 2000: the only call that
+        // reliably breaks the foreground lock an ApplicationFrameHost holds.
+        [DllImport("user32.dll")]
+        public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+        [DllImport("user32.dll")]
+        public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+        public static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        static extern int GetWindowTextW(IntPtr hWnd, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int maxCount);
+        public static extern int GetWindowTextW(IntPtr hWnd, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int maxCount);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        static extern int GetClassNameW(IntPtr hWnd, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int maxCount);
+        public static extern int GetClassNameW(IntPtr hWnd, [MarshalAs(UnmanagedType.LPWStr)] StringBuilder text, int maxCount);
         [DllImport("user32.dll")]
-        static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
         [DllImport("user32.dll")]
-        static extern bool EnumChildWindows(IntPtr hwndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        public static extern bool EnumChildWindows(IntPtr hwndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
         [DllImport("user32.dll")]
-        static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+        public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
         [DllImport("user32.dll")]
-        static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+        public static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
         [DllImport("user32.dll")]
-        static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+        public static extern bool PostMessageW(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")]
-        static extern bool SetProcessDPIAware();
+        public static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")]
-        static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
+        public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint dwFlags);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO lpmi);
+        public static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO lpmi);
         [DllImport("user32.dll")]
-        static extern IntPtr GetDC(IntPtr hWnd);
+        public static extern IntPtr GetDC(IntPtr hWnd);
         [DllImport("user32.dll")]
-        static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
         [DllImport("user32.dll")]
-        static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pprSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+        public static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize, IntPtr hdcSrc, ref POINT pprSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
         [DllImport("gdi32.dll")]
-        static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+        public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
         [DllImport("gdi32.dll")]
-        static extern bool DeleteDC(IntPtr hdc);
+        public static extern bool DeleteDC(IntPtr hdc);
         [DllImport("gdi32.dll")]
-        static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
+        public static extern IntPtr SelectObject(IntPtr hdc, IntPtr hgdiobj);
         [DllImport("gdi32.dll")]
-        static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER pbmi, uint iUsage, out IntPtr ppvBits, IntPtr hSection, uint dwOffset);
+        public static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER pbmi, uint iUsage, out IntPtr ppvBits, IntPtr hSection, uint dwOffset);
         [DllImport("dwmapi.dll")]
-        static extern int DwmRegisterThumbnail(IntPtr hwndDestination, IntPtr hwndSource, out IntPtr phThumbnailId);
+        public static extern int DwmRegisterThumbnail(IntPtr hwndDestination, IntPtr hwndSource, out IntPtr phThumbnailId);
         [DllImport("dwmapi.dll")]
-        static extern int DwmUpdateThumbnailProperties(IntPtr hThumbnailId, ref DWM_THUMBNAIL_PROPERTIES ptnc);
+        public static extern int DwmUpdateThumbnailProperties(IntPtr hThumbnailId, ref DWM_THUMBNAIL_PROPERTIES ptnc);
         [DllImport("dwmapi.dll")]
-        static extern int DwmUnregisterThumbnail(IntPtr hThumbnailId);
+        public static extern int DwmUnregisterThumbnail(IntPtr hThumbnailId);
         [DllImport("dwmapi.dll")]
-        static extern int DwmQueryThumbnailSourceSize(IntPtr hThumbnail, out SIZE psize);
+        public static extern int DwmQueryThumbnailSourceSize(IntPtr hThumbnail, out SIZE psize);
         [DllImport("dwmapi.dll")]
-        static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+        public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
         [DllImport("shcore.dll")]
-        static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+        public static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+        public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        static extern bool QueryFullProcessImageNameW(IntPtr hProcess, uint dwFlags, StringBuilder lpExeName, ref int lpdwSize);
+        public static extern bool QueryFullProcessImageNameW(IntPtr hProcess, uint dwFlags, StringBuilder lpExeName, ref int lpdwSize);
         [DllImport("kernel32.dll", SetLastError = true)]
-        static extern bool CloseHandle(IntPtr hObject);
+        public static extern bool CloseHandle(IntPtr hObject);
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-        static extern IntPtr SHGetFileInfoW(string pszPath, uint dwFileAttributes, ref SHFILEINFOW psfi, uint cbFileInfo, uint uFlags);
+        public static extern IntPtr SHGetFileInfoW(string pszPath, uint dwFileAttributes, ref SHFILEINFOW psfi, uint cbFileInfo, uint uFlags);
 
         [StructLayout(LayoutKind.Sequential)]
-        struct SIZE { public int cx, cy; }
+        public struct SIZE { public int cx, cy; }
 
         // ================= IVirtualDesktopManager (read-only use) =================
         [ComImport, Guid("aa509086-5ca9-4c25-8f95-589d3c07b0f8"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        interface IVirtualDesktopManager
+        public interface IVirtualDesktopManager
         {
             [PreserveSig]
             int IsWindowOnCurrentVirtualDesktop(IntPtr topLevelWindow, out bool onCurrentDesktop);
         }
 
         [ComImport, Guid("9acda8ce-73d8-41a4-9373-4030c759a53e")]
-        class VirtualDesktopManagerClass { }
+        public class VirtualDesktopManagerClass { }
+    }
 
-        static IVirtualDesktopManager _vdm;
+    // ================= Pure overlay/cycle logic =================
+    // Pure functions mirroring PowerToys AltWindowCycle's
+    // AltWindowCycleLogic.h: no Win32 calls, so the layout/cycle math
+    // stays unit-testable and the port's fidelity to the reference is
+    // checkable by inspection.
+    static class Logic
+    {
+        public const int MaxColumns = 6;
+        // topmost apps are offset past every non-topmost one (their raw
+        // Z-order position is meaningless: always painted above
+        // everything else regardless of activation)
+        public const int TopmostSortOffset = 0x40000000;
 
-        static bool OnCurrentDesktop(IntPtr hwnd)
-        {
-            try
-            {
-                if (_vdm == null) return true;
-                bool on;
-                if (_vdm.IsWindowOnCurrentVirtualDesktop(hwnd, out on) != 0) return true;
-                return on;
-            }
-            catch { return true; }
-        }
-
-        // ================= Hopper port: layout =================
-        const int MaxColumns = 6;
-
-        struct OverlayLayout
+        public struct OverlayLayout
         {
             public double scale;
             public int pad, gap, tileW, tileH, headerH, previewH, inner, radius, iconSize;
@@ -301,29 +322,29 @@ namespace AltTabSwitcher
             public int panelX, panelY, panelW, panelH;
         }
 
-        static int Scaled(double scale, int v) { return (int)(v * scale + 0.5); }
+        public static int Scaled(double scale, int v) { return (int)(v * scale + 0.5); }
 
-        static RECT TileRect(ref OverlayLayout L, int index)
+        public static NativeMethods.RECT TileRect(ref OverlayLayout L, int index)
         {
             int col = index % L.cols, row = index / L.cols;
             int left = L.pad + col * (L.tileW + L.gap);
             int top = L.pad + row * (L.tileH + L.gap);
-            return new RECT { Left = left, Top = top, Right = left + L.tileW, Bottom = top + L.tileH };
+            return new NativeMethods.RECT { Left = left, Top = top, Right = left + L.tileW, Bottom = top + L.tileH };
         }
 
-        static RECT PreviewRect(ref OverlayLayout L, RECT tile)
+        public static NativeMethods.RECT PreviewRect(ref OverlayLayout L, NativeMethods.RECT tile)
         {
             int stroke = Scaled(L.scale, 1);
-            return new RECT { Left = tile.Left + stroke, Top = tile.Top + L.headerH, Right = tile.Right - stroke, Bottom = tile.Bottom - stroke };
+            return new NativeMethods.RECT { Left = tile.Left + stroke, Top = tile.Top + L.headerH, Right = tile.Right - stroke, Bottom = tile.Bottom - stroke };
         }
 
-        static RECT HeaderRect(ref OverlayLayout L, RECT tile)
+        public static NativeMethods.RECT HeaderRect(ref OverlayLayout L, NativeMethods.RECT tile)
         {
             int margin = Scaled(L.scale, 12);
-            return new RECT { Left = tile.Left + margin, Top = tile.Top, Right = tile.Right - margin, Bottom = tile.Top + L.headerH };
+            return new NativeMethods.RECT { Left = tile.Left + margin, Top = tile.Top, Right = tile.Right - margin, Bottom = tile.Top + L.headerH };
         }
 
-        static RECT CoverSource(RECT dest, RECT avail)
+        public static NativeMethods.RECT CoverSource(NativeMethods.RECT dest, NativeMethods.RECT avail)
         {
             int aw = avail.Right - avail.Left, ah = avail.Bottom - avail.Top;
             int dw = dest.Right - dest.Left, dh = dest.Bottom - dest.Top;
@@ -333,14 +354,14 @@ namespace AltTabSwitcher
             {
                 int cw = (int)(ah * destA + 0.5); if (cw < 1) cw = 1;
                 int x = avail.Left + (aw - cw) / 2;
-                return new RECT { Left = x, Top = avail.Top, Right = x + cw, Bottom = avail.Bottom };
+                return new NativeMethods.RECT { Left = x, Top = avail.Top, Right = x + cw, Bottom = avail.Bottom };
             }
             int ch = (int)(aw / destA + 0.5); if (ch < 1) ch = 1;
             int y = avail.Top + (ah - ch) / 2;
-            return new RECT { Left = avail.Left, Top = y, Right = avail.Right, Bottom = y + ch };
+            return new NativeMethods.RECT { Left = avail.Left, Top = y, Right = avail.Right, Bottom = y + ch };
         }
 
-        static void ComputeLayout(RECT work, int windowCount, double scale, ref OverlayLayout L)
+        public static void ComputeLayout(NativeMethods.RECT work, int windowCount, double scale, ref OverlayLayout L)
         {
             L.scale = scale;
             L.pad = Scaled(scale, 32);
@@ -373,11 +394,58 @@ namespace AltTabSwitcher
             if (L.panelY < work.Top) L.panelY = work.Top;
         }
 
-        static int PageStartFor(int selected, int windowCount, int pageSize)
+        public static int PageStartFor(int selected, int windowCount, int pageSize)
         {
             if (windowCount <= 0 || pageSize <= 0) return 0;
             int idx = Math.Max(0, Math.Min(selected, windowCount - 1));
             return (idx / pageSize) * pageSize;
+        }
+
+
+        // foreground app gets -1 (always first); non-topmost apps keep their
+        // Z-order rank; topmost apps are offset past every non-topmost one
+        public static int AppSortKey(AppEntry e, IntPtr fg, string fgExe)
+        {
+            if (e.ReprHwnd == fg) return -1;
+            // GetForegroundWindow() does not necessarily return the group's
+            // representative (a UWP app may report its CoreWindow, a minimized
+            // group reports an owned popup), so match the foreground
+            // *application* too. Without this the foreground app is not pinned
+            // to slot 0, and Alt+Tab lands one app further back than it should.
+            if (fgExe != null && string.Equals(e.Exe, fgExe, StringComparison.OrdinalIgnoreCase)) return -1;
+            return (e.Topmost ? TopmostSortOffset : 0) + e.Rank;
+        }
+    }
+
+    // ================= cycled-application model =================
+    // One entry per cycled application: representative window plus the
+    // grouping/paint state the overlay needs.
+    class AppEntry
+    {
+        public IntPtr ReprHwnd;
+        public string Exe;
+        public string Title;
+        public Icon Icon;      // shared handle (window icons) or owned clone
+        public IntPtr Thumb = IntPtr.Zero;
+        public int Rank;       // Z-order rank of the representative window
+        public bool Topmost;   // representative window is WS_EX_TOPMOST
+    }
+
+    static class Program
+    {
+
+        static NativeMethods.IVirtualDesktopManager _vdm;
+
+        static bool OnCurrentDesktop(IntPtr hwnd)
+        {
+            try
+            {
+                if (_vdm == null) return true;
+                bool on;
+                if (_vdm.IsWindowOnCurrentVirtualDesktop(hwnd, out on) != 0) return true;
+                return on;
+            }
+            catch { return true; }
         }
 
         // ================= theme / accent =================
@@ -421,21 +489,10 @@ namespace AltTabSwitcher
         static Color FocusShadowC(bool light) { return light ? Color.FromArgb(120, 255, 255, 255) : Color.FromArgb(150, 0, 0, 0); }
 
         // ================= state =================
-        class AppEntry
-        {
-            public IntPtr ReprHwnd;
-            public string Exe;
-            public string Title;
-            public Icon Icon;      // shared handle (window icons) or owned clone
-            public IntPtr Thumb = IntPtr.Zero;
-            public int Rank;       // Z-order rank of the representative window
-            public bool Topmost;   // representative window is WS_EX_TOPMOST
-        }
-
         static IntPtr _hook = IntPtr.Zero;
         static IntPtr _mouseHook = IntPtr.Zero;
-        static HookProc _hookProc;
-        static HookProc _mouseHookProc;
+        static NativeMethods.HookProc _hookProc;
+        static NativeMethods.HookProc _mouseHookProc;
         static Mutex _mutex;
         static StreamWriter _log;
         static bool _enabled = true;
@@ -448,11 +505,17 @@ namespace AltTabSwitcher
         static List<AppEntry> _apps = new List<AppEntry>();
         static List<IntPtr> _thumbs = new List<IntPtr>();
         static bool _session;
+        // Commit/Cancel teardown in progress: a second trigger pumped in via
+        // Application.DoEvents (watchdog tick / queued WM_APP_COMMIT) must
+        // no-op instead of running a nested Commit to completion - the nested
+        // one activated the target, the outer one then failed its retries and
+        // handed the foreground back to the source ("To Do stays in front").
+        static bool _committing;
         static int _index;
         static int _pageStart;
         static IntPtr _fgHwnd;
-        static OverlayLayout _layout;
-        static RECT _panelRect;
+        static Logic.OverlayLayout _layout;
+        static NativeMethods.RECT _panelRect;
         static double _scale = 1.0;
 
         static void Log(string msg)
@@ -462,8 +525,8 @@ namespace AltTabSwitcher
             catch { }
         }
 
-        static void Post(int m) { PostMessageW(_msg.Handle, (uint)m, IntPtr.Zero, IntPtr.Zero); }
-        static void PostAt(int m, int i) { PostMessageW(_msg.Handle, (uint)m, (IntPtr)i, IntPtr.Zero); }
+        static void Post(int m) { NativeMethods.PostMessageW(_msg.Handle, (uint)m, IntPtr.Zero, IntPtr.Zero); }
+        static void PostAt(int m, int i) { NativeMethods.PostMessageW(_msg.Handle, (uint)m, (IntPtr)i, IntPtr.Zero); }
 
         // ================= windows =================
         class MsgForm : Form
@@ -472,11 +535,11 @@ namespace AltTabSwitcher
             protected override bool ShowWithoutActivation { get { return true; } }
             protected override CreateParams CreateParams
             {
-                get { var cp = base.CreateParams; cp.ExStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE; return cp; }
+                get { var cp = base.CreateParams; cp.ExStyle |= NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_NOACTIVATE; return cp; }
             }
             protected override void WndProc(ref Message m)
             {
-                if (m.Msg >= WM_APP_START && m.Msg <= WM_APP_COMMITAT) { HandleAppMsg(m.Msg, m.WParam); return; }
+                if (m.Msg >= NativeMethods.WM_APP_START && m.Msg <= NativeMethods.WM_APP_COMMITAT) { HandleAppMsg(m.Msg, m.WParam); return; }
                 base.WndProc(ref m);
             }
         }
@@ -493,7 +556,7 @@ namespace AltTabSwitcher
             protected override bool ShowWithoutActivation { get { return true; } }
             protected override CreateParams CreateParams
             {
-                get { var cp = base.CreateParams; cp.ExStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST; return cp; }
+                get { var cp = base.CreateParams; cp.ExStyle |= NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOPMOST; return cp; }
             }
         }
 
@@ -509,58 +572,61 @@ namespace AltTabSwitcher
             protected override bool ShowWithoutActivation { get { return true; } }
             protected override CreateParams CreateParams
             {
-                get { var cp = base.CreateParams; cp.ExStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_LAYERED; return cp; }
+                get { var cp = base.CreateParams; cp.ExStyle |= NativeMethods.WS_EX_TOOLWINDOW | NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOPMOST | NativeMethods.WS_EX_LAYERED; return cp; }
             }
         }
 
         // ================= enumeration =================
         static string ExePathOfPid(uint pid)
         {
-            IntPtr h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
+            IntPtr h = NativeMethods.OpenProcess(NativeMethods.PROCESS_QUERY_LIMITED_INFORMATION, false, pid);
             if (h == IntPtr.Zero) return null;
             try
             {
                 var sb = new StringBuilder(1024);
                 int size = sb.Capacity;
-                if (QueryFullProcessImageNameW(h, 0, sb, ref size) && size > 0)
+                if (NativeMethods.QueryFullProcessImageNameW(h, 0, sb, ref size) && size > 0)
                     return sb.ToString(0, size);
                 return null;
             }
-            finally { CloseHandle(h); }
+            finally { NativeMethods.CloseHandle(h); }
         }
 
         static IntPtr FindWindowByClass(IntPtr parent, string className)
         {
             IntPtr found = IntPtr.Zero;
-            EnumChildWindows(parent, delegate(IntPtr h, IntPtr lp)
+            NativeMethods.EnumChildWindows(parent, delegate(IntPtr h, IntPtr lp)
             {
                 var sb = new StringBuilder(256);
-                GetClassNameW(h, sb, sb.Capacity);
+                NativeMethods.GetClassNameW(h, sb, sb.Capacity);
                 if (sb.ToString() == className) { found = h; return false; }
                 return true;
             }, IntPtr.Zero);
             return found;
         }
 
+        static string ClassNameOf(IntPtr hwnd)
+        {
+            var c = new StringBuilder(64);
+            NativeMethods.GetClassNameW(hwnd, c, c.Capacity);
+            return c.ToString();
+        }
+
         static string WindowExe(IntPtr hwnd)
         {
             uint pid;
-            GetWindowThreadProcessId(hwnd, out pid);
+            NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
             if (pid == 0) return null;
             string exe = ExePathOfPid(pid);
             if (exe != null && exe.EndsWith("applicationframehost.exe", StringComparison.OrdinalIgnoreCase))
             {
-                // Prefer the frame's child CoreWindow. When the app is suspended
-                // its window tree is torn down, so fall back to matching a
-                // top-level CoreWindow with the same title (Windows keeps that
-                // window around while the app is backgrounded).
-                IntPtr child = FindWindowByClass(hwnd, "Windows.UI.Core.CoreWindow");
-                if (child == IntPtr.Zero)
-                    child = FindTopLevelCoreWindowByTitle(GetWindowTitle(hwnd));
+                // A UWP frame is only a shell: attribute it to the app that owns
+                // the CoreWindow it hosts.
+                IntPtr child = UwpCoreWindowOf(hwnd);
                 if (child != IntPtr.Zero)
                 {
                     uint cpid;
-                    GetWindowThreadProcessId(child, out cpid);
+                    NativeMethods.GetWindowThreadProcessId(child, out cpid);
                     string cexe = ExePathOfPid(cpid);
                     if (cexe != null) return cexe;
                 }
@@ -569,10 +635,73 @@ namespace AltTabSwitcher
             return exe;
         }
 
+        // The CoreWindow is a child of the frame while the app runs. Once it
+        // suspends the window tree is torn down and Windows keeps only a
+        // top-level CoreWindow carrying the same title, so match by title then.
+        static IntPtr UwpCoreWindowOf(IntPtr frame)
+        {
+            IntPtr child = FindWindowByClass(frame, ClassCoreWindow);
+            if (child != IntPtr.Zero) return child;
+            return FindTopLevelCoreWindowByTitle(GetWindowTitle(frame));
+        }
+
+        // Reverse lookup: GetForegroundWindow() reports a UWP app's CoreWindow
+        // just as often as its frame, and only the frame is in the cycle.
+        static IntPtr UwpFrameOf(IntPtr coreWindow)
+        {
+            IntPtr p = NativeMethods.GetParent(coreWindow);
+            if (p != IntPtr.Zero && ClassNameOf(p) == ClassAppFrame) return p;
+            string title = GetWindowTitle(coreWindow);
+            if (string.IsNullOrEmpty(title)) return IntPtr.Zero;
+            IntPtr found = IntPtr.Zero;
+            NativeMethods.EnumWindows(delegate(IntPtr h, IntPtr lp)
+            {
+                if (ClassNameOf(h) != ClassAppFrame) return true;
+                if (GetWindowTitle(h) == title) { found = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        const string ClassCoreWindow = "Windows.UI.Core.CoreWindow";
+        const string ClassAppFrame = "ApplicationFrameWindow";
+
+        // The classic native Alt-Tab owner-chain walk (Raymond Chen /
+        // PowerToys AltWindowCycle): root owner, then GetLastActivePopup
+        // until it stops changing or turns visible. Single implementation
+        // shared by RepresentativeOf and the eligibility predicate - the
+        // logic used to live in three drifting copies.
+        static IntPtr OwnerChainRepresentative(IntPtr hwnd)
+        {
+            IntPtr walk = NativeMethods.GetAncestor(hwnd, NativeMethods.GA_ROOTOWNER);
+            for (; ; )
+            {
+                IntPtr pop = NativeMethods.GetLastActivePopup(walk);
+                if (pop == walk) break;
+                if (NativeMethods.IsWindowVisible(pop)) break;
+                walk = pop;
+            }
+            return walk;
+        }
+
+        // Map any window onto the window that stands for it in the cycle: the
+        // UWP CoreWindow<->frame pairing plus the owner-chain walk (a group
+        // whose main window is minimized is represented by its visible owned
+        // popup).
+        static IntPtr RepresentativeOf(IntPtr hwnd)
+        {
+            if (ClassNameOf(hwnd) == ClassCoreWindow)
+            {
+                IntPtr frame = UwpFrameOf(hwnd);
+                if (frame != IntPtr.Zero) hwnd = frame;
+            }
+            return OwnerChainRepresentative(hwnd);
+        }
+
         static string GetWindowTitle(IntPtr hwnd)
         {
             var t = new StringBuilder(256);
-            GetWindowTextW(hwnd, t, 256);
+            NativeMethods.GetWindowTextW(hwnd, t, 256);
             return t.ToString();
         }
 
@@ -580,42 +709,39 @@ namespace AltTabSwitcher
         {
             if (string.IsNullOrEmpty(title)) return IntPtr.Zero;
             IntPtr found = IntPtr.Zero;
-            EnumWindows(delegate(IntPtr h, IntPtr lp)
+            NativeMethods.EnumWindows(delegate(IntPtr h, IntPtr lp)
             {
                 var cls = new StringBuilder(64);
-                GetClassNameW(h, cls, 64);
-                if (cls.ToString() != "Windows.UI.Core.CoreWindow") return true;
+                NativeMethods.GetClassNameW(h, cls, 64);
+                if (cls.ToString() != ClassCoreWindow) return true;
                 if (GetWindowTitle(h) == title) { found = h; return false; }
                 return true;
             }, IntPtr.Zero);
             return found;
         }
 
-        // The classic native Alt-Tab predicate (Raymond Chen / PowerToys
-        // AltWindowCycle): a window participates only when it is the visible
-        // representative of its owner chain - i.e. walking root-owner ->
-        // GetLastActivePopup lands back on it (or on a visible popup chain
-        // that ends at it). This also catches groups whose main window is
-        // minimized while an owned dialog is still visible.
         static bool IsCloaked(IntPtr hwnd)
         {
             int v;
-            return DwmGetWindowAttribute(hwnd, 14 /*DWMWA_CLOAKED*/, out v, 4) == 0 && v != 0;
+            return NativeMethods.DwmGetWindowAttribute(hwnd, 14 /*DWMWA_CLOAKED*/, out v, 4) == 0 && v != 0;
         }
 
-        static bool AltTabEligible(IntPtr hwnd)
+        // The classic native Alt-Tab predicate (Raymond Chen / PowerToys
+        // AltWindowCycle) plus this app's extra exclusions, as a SINGLE
+        // predicate that reports why a top-level window is left out of the
+        // cycle (null = it participates). It used to exist in two drifting
+        // copies (AltTabEligible + the SkipReason diagnostic); the merged
+        // form serves both the filter and the log so they can never diverge.
+        static string AltTabIneligibilityReason(IntPtr hwnd)
         {
-            if (!IsWindowVisible(hwnd)) return false;
+            if (!NativeMethods.IsWindowVisible(hwnd)) return "invisible";
 
-            var cls = new StringBuilder(64);
-            GetClassNameW(hwnd, cls, 64);
-            string cn = cls.ToString();
-
+            string cn = ClassNameOf(hwnd);
             // frameless UWP system hosts (text input, search, shell dialogs)
             // never belong in the cycle; real UWP apps live behind an
-            // ApplicationFrameWindow and are handled below
-            if (cn == "Windows.UI.Core.CoreWindow") return false;
-            if (cn == "Progman" || cn == "WorkerW") return false;
+            // ApplicationFrameWindow and stay in.
+            if (cn == ClassCoreWindow) return "corewindow";
+            if (cn == "Progman" || cn == "WorkerW") return "desktop";
 
             // Cloak rule (native/Hopper parity): any cloaked window is out.
             // DWM_CLOAKED_SHELL (2) covers windows parked on other virtual
@@ -624,53 +750,67 @@ namespace AltTabSwitcher
             // UWP helper windows, background UI). A suspended UWP app's frame
             // itself stays uncloaked, so suspended apps remain listed - and
             // activating one wakes it.
-            if (IsCloaked(hwnd)) return false;
+            if (IsCloaked(hwnd)) return "cloaked";
 
-            IntPtr walk = GetAncestor(hwnd, GA_ROOTOWNER);
-            for (;;)
-            {
-                IntPtr tryPopup = GetLastActivePopup(walk);
-                if (tryPopup == walk) break;
-                if (IsWindowVisible(tryPopup)) break;
-                walk = tryPopup;
-            }
-            if (walk != hwnd) return false;
+            // Only the visible representative of its owner chain participates
+            // (this also catches groups whose main window is minimized while
+            // an owned dialog is still visible).
+            if (OwnerChainRepresentative(hwnd) != hwnd) return "not-owner-rep";
 
-            int ex = GetWindowLong(hwnd, GWL_EXSTYLE);
-            if ((ex & WS_EX_TOOLWINDOW) != 0 && (ex & WS_EX_APPWINDOW) == 0) return false;
+            int ex = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
+            if ((ex & NativeMethods.WS_EX_TOOLWINDOW) != 0 && (ex & NativeMethods.WS_EX_APPWINDOW) == 0) return "toolwindow";
 
-            var title = new StringBuilder(256);
-            GetWindowTextW(hwnd, title, 256);
-            if (title.Length == 0) return false;
-            if (title.ToString() == "Windows Input Experience") return false;
+            string title = GetWindowTitle(hwnd);
+            if (title.Length == 0) return "no-title";
+            if (title == "Windows Input Experience") return "input-experience";
+            if (!OnCurrentDesktop(hwnd)) return "other-desktop";
 
-            RECT r;
-            if (GetWindowRect(hwnd, out r) && r.Right - r.Left <= 1 && r.Bottom - r.Top <= 1) return false;
-            return true;
+            NativeMethods.RECT r;
+            if (NativeMethods.GetWindowRect(hwnd, out r) && r.Right - r.Left <= 1 && r.Bottom - r.Top <= 1) return "tiny";
+            if (WindowExe(hwnd) == null) return "no-exe";
+            return null;
         }
 
+        // Owns a private copy of h, so the caller may dispose it freely.
+        static Icon CopyIconSafe(IntPtr h)
+        {
+            try
+            {
+                IntPtr copy = NativeMethods.CopyIcon(h);
+                if (copy != IntPtr.Zero) return Icon.FromHandle(copy);
+            }
+            catch { }
+            return null;
+        }
+
+        // Always returns an icon this process owns, so EndSession can dispose it
+        // unconditionally. Window icons are copied first: adopting a live HICON
+        // via Icon.FromHandle() and disposing it (or letting it be finalized)
+        // destroys the target window's own icon, blanking it on screen and in
+        // the taskbar.
         static Icon GetAppIcon(IntPtr hwnd, string exe)
         {
             // prefer the window's own icons (exactly what the taskbar shows)
             IntPtr res;
-            if (SendMessageTimeoutW(hwnd, WM_GETICON, (IntPtr)ICON_SMALL2, IntPtr.Zero, SMTO_ABORTIFHUNG, 100, out res) != IntPtr.Zero && res != IntPtr.Zero)
-                return Icon.FromHandle(res);
-            if (SendMessageTimeoutW(hwnd, WM_GETICON, (IntPtr)ICON_BIG, IntPtr.Zero, SMTO_ABORTIFHUNG, 100, out res) != IntPtr.Zero && res != IntPtr.Zero)
-                return Icon.FromHandle(res);
-            int cls = GetClassLong(hwnd, GCLP_HICONSM);
-            if (cls != 0) return Icon.FromHandle((IntPtr)cls);
-            cls = GetClassLong(hwnd, GCLP_HICON);
-            if (cls != 0) return Icon.FromHandle((IntPtr)cls);
+            if (NativeMethods.SendMessageTimeoutW(hwnd, NativeMethods.WM_GETICON, (IntPtr)NativeMethods.ICON_SMALL2, IntPtr.Zero, NativeMethods.SMTO_ABORTIFHUNG, 100, out res) != IntPtr.Zero && res != IntPtr.Zero)
+            { Icon i = CopyIconSafe(res); if (i != null) return i; }
+            if (NativeMethods.SendMessageTimeoutW(hwnd, NativeMethods.WM_GETICON, (IntPtr)NativeMethods.ICON_BIG, IntPtr.Zero, NativeMethods.SMTO_ABORTIFHUNG, 100, out res) != IntPtr.Zero && res != IntPtr.Zero)
+            { Icon i = CopyIconSafe(res); if (i != null) return i; }
+            Icon ci = CopyIconSafe(NativeMethods.GetClassLongPtr(hwnd, NativeMethods.GCLP_HICONSM));
+            if (ci != null) return ci;
+            ci = CopyIconSafe(NativeMethods.GetClassLongPtr(hwnd, NativeMethods.GCLP_HICON));
+            if (ci != null) return ci;
 
             try
             {
-                var fi = new SHFILEINFOW();
-                IntPtr r2 = SHGetFileInfoW(exe, 0x80, ref fi, (uint)Marshal.SizeOf(typeof(SHFILEINFOW)), SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES);
-                if (r2 != IntPtr.Zero && fi.hIcon != IntPtr.Zero)
-                    return Icon.FromHandle(fi.hIcon).Clone() as Icon;
+                var fi = new NativeMethods.SHFILEINFOW();
+                IntPtr r2 = NativeMethods.SHGetFileInfoW(exe, 0x80, ref fi, (uint)Marshal.SizeOf(typeof(NativeMethods.SHFILEINFOW)), NativeMethods.SHGFI_ICON | NativeMethods.SHGFI_LARGEICON | NativeMethods.SHGFI_USEFILEATTRIBUTES);
+                // the shell allocates this one for us, so adopting it (and
+                // disposing it later) is exactly right
+                if (r2 != IntPtr.Zero && fi.hIcon != IntPtr.Zero) return Icon.FromHandle(fi.hIcon);
             }
             catch { }
-            return SystemIcons.Application;
+            return (Icon)SystemIcons.Application.Clone();
         }
 
         // ================= state machine =================
@@ -678,56 +818,80 @@ namespace AltTabSwitcher
         {
             switch (msg)
             {
-                case WM_APP_START:
-                    if (!_session) StartSession();
+                case NativeMethods.WM_APP_START:
+                    // Logged here rather than in the hook callback (which
+                    // must stay I/O-free): a received message proves the
+                    // whole hook -> post -> dispatch chain.
+                    if (!_session) { Log("hotkey: alt+tab -> start"); StartSession(); }
                     if (_session && !AltDown()) Commit();  // quick tap: Alt already released
                     break;
-                case WM_APP_NEXT: if (_session) MoveIndex(1); break;
-                case WM_APP_PREV: if (_session) MoveIndex(-1); break;
-                case WM_APP_COMMIT: if (_session) Commit(); break;
-                case WM_APP_CANCEL: if (_session) Cancel(); break;
-                case WM_APP_COMMITAT: if (_session) { _index = (int)wparam; RenderChrome(); Commit(); } break;
+                case NativeMethods.WM_APP_NEXT: if (_session) MoveIndex(1); break;
+                case NativeMethods.WM_APP_PREV: if (_session) MoveIndex(-1); break;
+                case NativeMethods.WM_APP_COMMIT: if (_session) { Log("hotkey: alt up -> commit"); Commit(); } break;
+                case NativeMethods.WM_APP_CANCEL: if (_session) Cancel(); break;
+                case NativeMethods.WM_APP_COMMITAT: if (_session) { _index = (int)wparam; RenderChrome(); Commit(); } break;
             }
         }
 
-        static double MonitorScale(IntPtr hwnd, out RECT work)
+        static double MonitorScale(IntPtr hwnd, out NativeMethods.RECT work)
         {
-            IntPtr m = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-            var mi = new MONITORINFO();
-            mi.cbSize = Marshal.SizeOf(typeof(MONITORINFO));
-            if (m != IntPtr.Zero && GetMonitorInfoW(m, ref mi)) work = mi.rcWork;
-            else work = new RECT { Left = 0, Top = 0, Right = 1920, Bottom = 1080 };
+            IntPtr m = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MONITOR_DEFAULTTONEAREST);
+            var mi = new NativeMethods.MONITORINFO();
+            mi.cbSize = Marshal.SizeOf(typeof(NativeMethods.MONITORINFO));
+            if (m != IntPtr.Zero && NativeMethods.GetMonitorInfoW(m, ref mi)) work = mi.rcWork;
+            else work = new NativeMethods.RECT { Left = 0, Top = 0, Right = 1920, Bottom = 1080 };
             uint dx, dy;
-            if (m != IntPtr.Zero && GetDpiForMonitor(m, MDT_EFFECTIVE_DPI, out dx, out dy) == 0 && dx != 0)
+            if (m != IntPtr.Zero && NativeMethods.GetDpiForMonitor(m, NativeMethods.MDT_EFFECTIVE_DPI, out dx, out dy) == 0 && dx != 0)
                 return dx / 96.0;
             return 1.0;
         }
 
-        // foreground app gets -1 (always first); non-topmost apps keep their
-        // Z-order rank; topmost apps are offset past every non-topmost one
-        static int AppSortKey(AppEntry e, IntPtr fg)
-        {
-            if (e.ReprHwnd == fg) return -1;
-            return (e.Topmost ? 0x40000000 : 0) + e.Rank;
-        }
-
         static void StartSession()
         {
-            IntPtr fg = GetForegroundWindow();
-            if (fg == IntPtr.Zero) return;
+            IntPtr fgRaw = NativeMethods.GetForegroundWindow();
+            if (fgRaw == IntPtr.Zero) { Log("start aborted: no foreground window"); return; }
+            string fgExe = WindowExe(fgRaw);
+            if (fgExe == null)
+            {
+                Log("start aborted: no exe for fg 0x" + fgRaw.ToInt64().ToString("X")
+                    + " [" + ClassNameOf(fgRaw) + "] \"" + GetWindowTitle(fgRaw) + "\"");
+                return;
+            }
+            // Normalise the foreground window onto the one that represents it in
+            // the cycle: a UWP app reports its CoreWindow (which the cycle
+            // predicate keeps out of the list) and a minimized group reports
+            // its owned popup. Matching on the raw handle alone fails in both.
+            IntPtr fg = RepresentativeOf(fgRaw);
+            if (fg == IntPtr.Zero || !NativeMethods.IsWindowVisible(fg)) fg = fgRaw;
             _fgHwnd = fg;
-            string fgExe = WindowExe(fg);
-            if (fgExe == null) return;
+            Log("fg 0x" + fgRaw.ToInt64().ToString("X") + " [" + ClassNameOf(fgRaw) + "] \""
+                + GetWindowTitle(fgRaw) + "\" -> repr 0x" + fg.ToInt64().ToString("X")
+                + " exe=" + Path.GetFileName(fgExe));
 
             var order = new List<AppEntry>();
             var byExe = new Dictionary<string, AppEntry>();
             int rank = 0;
-            EnumWindows(delegate(IntPtr hwnd, IntPtr lp)
+            NativeMethods.EnumWindows(delegate(IntPtr hwnd, IntPtr lp)
             {
-                if (!AltTabEligible(hwnd)) { rank++; return true; }
-                if (!OnCurrentDesktop(hwnd)) { rank++; return true; }
+                // Every top-level window consumes one Z-order slot. Incrementing
+                // only on the skip branches gives two adjacent apps the same
+                // rank, which makes the sort order them randomly - the cycle
+                // then alternates between two different "next" apps from the
+                // same foreground window (the "wrong app gets mixed in" bug).
+                int myRank = rank++;
+                // Single predicate serves filter AND log: no double evaluation,
+                // no second copy to drift out of sync.
+                string why = AltTabIneligibilityReason(hwnd);
+                if (why != null)
+                {
+                    if (_log != null)
+                        Log("  skip 0x" + hwnd.ToInt64().ToString("X") + " [" + ClassNameOf(hwnd)
+                            + "] \"" + GetWindowTitle(hwnd) + "\" - " + why);
+                    return true;
+                }
+                // The predicate already vetted that an exe resolves; re-resolve
+                // here to obtain the value itself.
                 string exe = WindowExe(hwnd);
-                if (exe == null) { rank++; return true; }
                 AppEntry e;
                 if (!byExe.TryGetValue(exe, out e))
                 {
@@ -735,27 +899,31 @@ namespace AltTabSwitcher
                     {
                         Exe = exe,
                         ReprHwnd = hwnd,
-                        Rank = rank,
+                        Rank = myRank,
                         // topmost windows sit at the head of the raw Z-order but
                         // usually haven't been activated recently (PowerToys
                         // CropAndLock crops, always-on-top tools, ...); sorting
                         // them raw would let one stale overlay hog the top of
                         // every Alt+Tab cycle, so they are demoted below
-                        Topmost = (GetWindowLong(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0
+                        Topmost = (NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE) & NativeMethods.WS_EX_TOPMOST) != 0
                     };
                     var t = new StringBuilder(256);
-                    GetWindowTextW(hwnd, t, 256);
+                    NativeMethods.GetWindowTextW(hwnd, t, 256);
                     e.Title = t.ToString();
                     byExe[exe] = e;
                     order.Add(e);
                 }
                 return true;
             }, IntPtr.Zero);
-            if (order.Count < 2) return;
+            if (order.Count < 2)
+            {
+                Log("start aborted: only " + order.Count + " app(s) in cycle");
+                return;
+            }
 
-            RECT work;
+            NativeMethods.RECT work;
             _scale = MonitorScale(fg, out work);
-            ComputeLayout(work, order.Count, _scale, ref _layout);
+            Logic.ComputeLayout(work, order.Count, _scale, ref _layout);
 
             // foreground app first, then MRU-ish Z-order with topmost apps last
             // (their raw Z-order position is meaningless: topmost windows are
@@ -763,15 +931,23 @@ namespace AltTabSwitcher
             _apps = order;
             _apps.Sort(delegate(AppEntry a, AppEntry b)
             {
-                int ka = AppSortKey(a, fg), kb = AppSortKey(b, fg);
+                int ka = Logic.AppSortKey(a, fg, fgExe), kb = Logic.AppSortKey(b, fg, fgExe);
                 return ka != kb ? ka.CompareTo(kb) : a.Rank.CompareTo(b.Rank);
             });
-            _index = 1;
+            // Preselect the app the user last used. Slot 0 is the foreground app
+            // only when it could be identified as such; if it could not (its
+            // window is not in the cycle at all) slot 0 is already the most
+            // recently used other app, and starting at 1 would skip it - which
+            // is exactly the "Alt+Tab goes one app too far back" symptom.
+            bool fgPinned = Logic.AppSortKey(_apps[0], fg, fgExe) == -1;
+            _index = fgPinned ? 1 : 0;
             _pageStart = 0;
+            Log("fgPinned=" + fgPinned + " index=" + _index);
 
             var sb2 = new StringBuilder("order:");
             foreach (var e in _apps)
-                sb2.Append(' ').Append(System.IO.Path.GetFileNameWithoutExtension(e.Exe)).Append(e.Topmost ? "*" : "");
+                sb2.Append(' ').Append(System.IO.Path.GetFileNameWithoutExtension(e.Exe))
+                   .Append('@').Append(e.Rank).Append(e.Topmost ? "*" : "");
             Log(sb2.ToString());
 
             foreach (var e in _apps) e.Icon = GetAppIcon(e.ReprHwnd, e.Exe);
@@ -789,18 +965,18 @@ namespace AltTabSwitcher
         static void ShowPanel()
         {
             _panel.BackColor = PanelFillC(LightTheme());
-            SetWindowPos(_panel.Handle, IntPtr.Zero, _layout.panelX, _layout.panelY, _layout.panelW, _layout.panelH, 0x0040 /*SWP_SHOWWINDOW*/);
-            IntPtr rgn = CreateRoundRectRgn(0, 0, _layout.panelW + 1, _layout.panelH + 1, 2 * Scaled(_scale, 8), 2 * Scaled(_scale, 8));
+            NativeMethods.SetWindowPos(_panel.Handle, IntPtr.Zero, _layout.panelX, _layout.panelY, _layout.panelW, _layout.panelH, 0x0040 /*SWP_SHOWWINDOW*/);
+            IntPtr rgn = NativeMethods.CreateRoundRectRgn(0, 0, _layout.panelW + 1, _layout.panelH + 1, 2 * Logic.Scaled(_scale, 8), 2 * Logic.Scaled(_scale, 8));
             if (rgn != IntPtr.Zero)
             {
-                if (!SetWindowRgn(_panel.Handle, rgn, false)) DeleteObject(rgn);
+                if (!NativeMethods.SetWindowRgn(_panel.Handle, rgn, false)) NativeMethods.DeleteObject(rgn);
             }
         }
 
         static void MoveIndex(int delta)
         {
             _index = ((_index + delta) % _apps.Count + _apps.Count) % _apps.Count;
-            int ps = PageStartFor(_index, _apps.Count, _layout.pageSize);
+            int ps = Logic.PageStartFor(_index, _apps.Count, _layout.pageSize);
             if (ps != _pageStart)
             {
                 _pageStart = ps;
@@ -816,33 +992,33 @@ namespace AltTabSwitcher
             for (int i = _pageStart, slot = 0; i < pageEnd; ++i, ++slot)
             {
                 var app = _apps[i];
-                RECT tile = TileRect(ref _layout, slot);
-                RECT pv = PreviewRect(ref _layout, tile);
+                NativeMethods.RECT tile = Logic.TileRect(ref _layout, slot);
+                NativeMethods.RECT pv = Logic.PreviewRect(ref _layout, tile);
                 app.Thumb = IntPtr.Zero;
                 // minimized and cloaked (suspended) windows have no DWM
                 // thumbnail content; the paint path shows a large icon instead
-                if (IsIconic(app.ReprHwnd) || IsCloaked(app.ReprHwnd)) continue;
+                if (NativeMethods.IsIconic(app.ReprHwnd) || IsCloaked(app.ReprHwnd)) continue;
                 IntPtr tid;
-                if (DwmRegisterThumbnail(_panel.Handle, app.ReprHwnd, out tid) != 0 || tid == IntPtr.Zero)
+                if (NativeMethods.DwmRegisterThumbnail(_panel.Handle, app.ReprHwnd, out tid) != 0 || tid == IntPtr.Zero)
                     continue;
                 app.Thumb = tid;
                 _thumbs.Add(tid);
 
-                RECT client = new RECT();
-                SIZE srcSize;
-                bool clientOnly = !IsIconic(app.ReprHwnd) && GetClientRect(app.ReprHwnd, out client);
+                NativeMethods.RECT client = new NativeMethods.RECT();
+                NativeMethods.SIZE srcSize;
+                bool clientOnly = !NativeMethods.IsIconic(app.ReprHwnd) && NativeMethods.GetClientRect(app.ReprHwnd, out client);
                 if (clientOnly) clientOnly = client.Right - client.Left > 0 && client.Bottom - client.Top > 0;
                 if (clientOnly)
                 {
                     srcSize.cx = client.Right - client.Left;
                     srcSize.cy = client.Bottom - client.Top;
                 }
-                else if (DwmQueryThumbnailSourceSize(tid, out srcSize) != 0)
+                else if (NativeMethods.DwmQueryThumbnailSourceSize(tid, out srcSize) != 0)
                 {
                     srcSize.cx = 0; srcSize.cy = 0;
                 }
 
-                RECT avail = new RECT { Left = 0, Top = 0, Right = srcSize.cx, Bottom = srcSize.cy };
+                NativeMethods.RECT avail = new NativeMethods.RECT { Left = 0, Top = 0, Right = srcSize.cx, Bottom = srcSize.cy };
                 if (clientOnly)
                 {
                     int ix = Math.Min(2, (avail.Right - avail.Left) / 4);
@@ -850,9 +1026,9 @@ namespace AltTabSwitcher
                     avail.Left += ix; avail.Right -= ix;
                     avail.Top += iy; avail.Bottom -= iy;
                 }
-                RECT rcSrc = CoverSource(pv, avail);
+                NativeMethods.RECT rcSrc = Logic.CoverSource(pv, avail);
 
-                var props = new DWM_THUMBNAIL_PROPERTIES
+                var props = new NativeMethods.DWM_THUMBNAIL_PROPERTIES
                 {
                     dwFlags = 0x1 | 0x2 | 0x4 | 0x8 | 0x10, // DEST|SOURCE|OPACITY|VISIBLE|CLIENTONLY
                     rcDestination = pv,
@@ -861,36 +1037,108 @@ namespace AltTabSwitcher
                     fVisible = true,
                     fSourceClientAreaOnly = clientOnly
                 };
-                DwmUpdateThumbnailProperties(tid, ref props);
+                NativeMethods.DwmUpdateThumbnailProperties(tid, ref props);
             }
         }
 
         static void UnregisterThumbnails()
         {
-            foreach (var t in _thumbs) { try { DwmUnregisterThumbnail(t); } catch { } }
+            foreach (var t in _thumbs) { try { NativeMethods.DwmUnregisterThumbnail(t); } catch { } }
             _thumbs.Clear();
         }
 
         static void Commit()
         {
+            // Reentrancy + idempotency guard: ForceForeground pumps messages
+            // (Application.DoEvents), and the pump can deliver a second commit
+            // trigger (watchdog tick / queued WM_APP_COMMIT). Without this
+            // guard the nested Commit ran to completion (activated the target,
+            // ended the session) and the outer one then kept retrying against
+            // the changed world, failed, and executed the failure fallback -
+            // handing the foreground right back to the source window (the
+            // "To Do stays in front" bug).
+            if (_committing) { Log("commit swallowed: reentrant"); return; }
+            if (!_session) return;
             if (_apps.Count == 0) { Cancel(); return; }
-            var app = _apps[_index];
-            EndSession();
-            if (IsWindow(app.ReprHwnd))
+            // Disarm every session-scoped trigger BEFORE doing any work: from
+            // here on the watchdog and every queued WM_APP_* message no-ops on
+            // the !_session check, so no nested trigger (pumped in via
+            // ForceForeground's DoEvents) can run a second teardown underneath
+            // us. Window Hopper achieves the same by killing its timer as the
+            // first act of Commit. _committing stays as belt-and-braces.
+            _session = false;
+            _committing = true;
+            try
             {
-                ForceForeground(app.ReprHwnd);
-                Log("commit -> 0x" + app.ReprHwnd.ToInt64().ToString("X") + " " + Path.GetFileName(app.Exe));
+                // Capture the target before any DoEvents can run: a nested
+                // WM_APP_NEXT/COMMITAT may still rewrite _index mid-teardown.
+                var app = _apps[_index];
+                IntPtr target = app.ReprHwnd;
+                string targetExe = app.Exe;
+                // Activate the target BEFORE hiding the overlay. Hiding first
+                // would park the foreground on a hidden window of ours and the
+                // switch would then start from there; and (worse for a UWP
+                // source) an intermediate SetForegroundWindow back to the
+                // source would re-arm its foreground lock.
+                bool ok = ForceForeground(target);
+                if (!ok) ok = ForegroundIs(target);   // FF's verdict can lag the real foreground; trust the latter
+                if (!ok)
+                {
+                    IntPtr nowFg = NativeMethods.GetForegroundWindow();
+                    if (nowFg == IntPtr.Zero || IsOwnWindow(nowFg))
+                    {
+                        // Nothing (or only our own dying overlay) holds the
+                        // foreground: restore the source so the desktop is
+                        // never left focus-dead. If a FOREIGN window already
+                        // holds it, leave it alone - grabbing it back is
+                        // precisely what re-armed the UWP foreground lock and
+                        // reverted successful switches.
+                        if (NativeMethods.IsWindow(_fgHwnd) && _fgHwnd != target)
+                        {
+                            Log("  commit fallback: restoring source 0x" + _fgHwnd.ToInt64().ToString("X"));
+                            NativeMethods.SetForegroundWindow(_fgHwnd);
+                        }
+                    }
+                    else
+                    {
+                        Log("  commit: fg held by 0x" + nowFg.ToInt64().ToString("X")
+                            + " [" + ClassNameOf(nowFg) + "], source restore skipped");
+                    }
+                }
+                EndSession();
+                IntPtr now = NativeMethods.GetForegroundWindow();
+                Log("commit -> 0x" + target.ToInt64().ToString("X") + " " + Path.GetFileName(targetExe)
+                    + " sfw=" + (ok ? "ok" : "FAILED")
+                    + " fgNow=0x" + now.ToInt64().ToString("X") + " [" + ClassNameOf(now) + "]");
             }
+            finally { _committing = false; }
         }
 
         static void Cancel()
         {
-            EndSession();
-            Log("cancel");
+            // Same reentrancy guard as Commit: a nested Cancel (pumped in via
+            // the DoEvents below or inside ForceForeground) would tear the
+            // session down under an in-flight Commit's feet.
+            if (_committing) { Log("cancel swallowed: reentrant"); return; }
+            if (!_session) return;
+            _committing = true;
+            try
+            {
+                // Hand the foreground back to the window that had it when the
+                // cycle opened, so hiding our topmost windows cannot park the
+                // foreground on a hidden window of ours.
+                if (NativeMethods.IsWindow(_fgHwnd)) { NativeMethods.SetForegroundWindow(_fgHwnd); Application.DoEvents(); }
+                EndSession();
+                Log("cancel");
+            }
+            finally { _committing = false; }
         }
 
         static void EndSession()
         {
+            // Reentrancy guard first: the watchdog timer must not re-enter
+            // Commit/Cancel while we tear down.
+            _session = false;
             UninstallMouseHook();
             UnregisterThumbnails();
             _panel.Hide();
@@ -901,25 +1149,108 @@ namespace AltTabSwitcher
                 e.Icon = null;
             }
             _apps.Clear();
-            _session = false;
         }
 
-        static void ForceForeground(IntPtr hwnd)
+        // Hand the foreground to hwnd.
+        //
+        // Windows grants SetForegroundWindow only to a process with an input
+        // claim - the foreground process, or the one that received the last
+        // input event. Against a UWP app (any ApplicationFrameWindow pair)
+        // two things go wrong at once: the lock is held by the CoreWindow's
+        // own app thread, which may be SUSPENDED and therefore cannot help
+        // even via AttachThreadInput; and SetForegroundWindow lies about it,
+        // reporting success while the frame keeps the foreground (the
+        // "To Do stays in front" bug). So the handoff is driven three ways:
+        //
+        //   1. AttachThreadInput to whoever owns the foreground RIGHT NOW
+        //      (raw handle - NOT _fgHwnd, which was normalised onto the
+        //      frame whose thread owns nothing). If the foreground happens
+        //      to be one of our own windows the thread is ours and the
+        //      fgThread != myThread check skips the attach by itself.
+        //   2. StakeInputClaim before every attempt: injecting an F24 makes
+        //      us the last-input process, which satisfies SetForegroundWindow
+        //      all by itself and needs no cooperation from the frozen thread.
+        //   3. SwitchToThisWindow as the escalation, the entry point the
+        //      task switcher itself uses.
+        //
+        // BringWindowToTop/SetFocus are kept on purpose: BringWindowToTop
+        // itself pumps messages (dropping it is what broke plain switching in
+        // the previous attempt), and SetFocus finishes the keyboard handoff
+        // once the window is already in the foreground.
+        //
+        // ForegroundIs: true when the foreground really is hwnd. Either half
+        // of the UWP CoreWindow<->frame pair may be reported as foreground,
+        // so compare through RepresentativeOf on both sides.
+        static bool ForegroundIs(IntPtr hwnd)
         {
+            IntPtr now = NativeMethods.GetForegroundWindow();
+            if (now == IntPtr.Zero) return false;
+            if (now == hwnd) return true;
+            return RepresentativeOf(now) == hwnd || RepresentativeOf(hwnd) == now;
+        }
+
+        // True when hwnd belongs to this process (panel / chrome / msg window).
+        // Used by Commit's fallback: foreground parked on one of our own
+        // windows counts as "nobody holds it" and may be reclaimed.
+        static bool IsOwnWindow(IntPtr hwnd)
+        {
+            if (hwnd == IntPtr.Zero) return false;
+            uint pid;
+            NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
+            return pid != 0 && pid == (uint)Process.GetCurrentProcess().Id;
+        }
+
+        // Press and release F24. The keystroke is delivered to whatever has
+        // focus and does nothing there, but it credits US with the last
+        // input event - the condition SetForegroundWindow actually checks.
+        static void StakeInputClaim()
+        {
+            NativeMethods.keybd_event(NativeMethods.VK_F24, 0, 0, UIntPtr.Zero);
+            NativeMethods.keybd_event(NativeMethods.VK_F24, 0, NativeMethods.KEYEVENTF_KEYUP, UIntPtr.Zero);
+        }
+
+        static bool ForceForeground(IntPtr hwnd)
+        {
+            if (!NativeMethods.IsWindow(hwnd)) return false;
+            if (NativeMethods.IsIconic(hwnd)) NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
+
+            IntPtr fgRaw = NativeMethods.GetForegroundWindow();
+            uint fgThread = fgRaw != IntPtr.Zero ? NativeMethods.GetWindowThreadProcessId(fgRaw, IntPtr.Zero) : 0;
+            uint myThread = NativeMethods.GetCurrentThreadId();
+            bool attached = fgThread != 0 && fgThread != myThread && NativeMethods.AttachThreadInput(myThread, fgThread, true);
             try
             {
-                if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
-                IntPtr fg = GetForegroundWindow();
-                uint fgThread = fg != IntPtr.Zero ? GetWindowThreadProcessId(fg, IntPtr.Zero) : 0;
-                uint myThread = GetCurrentThreadId();
-                bool attached = false;
-                if (fgThread != 0 && fgThread != myThread) attached = AttachThreadInput(myThread, fgThread, true);
-                BringWindowToTop(hwnd);
-                SetForegroundWindow(hwnd);
-                SetFocus(hwnd);
-                if (attached) AttachThreadInput(myThread, fgThread, false);
+                Application.DoEvents();
+                NativeMethods.BringWindowToTop(hwnd);
+                string how = null;
+                for (int i = 0; i < 4 && !ForegroundIs(hwnd); i++)
+                {
+                    StakeInputClaim();
+                    NativeMethods.SetForegroundWindow(hwnd);
+                    Application.DoEvents();
+                    if (ForegroundIs(hwnd)) { how = "sfw#" + (i + 1); break; }
+                    NativeMethods.SwitchToThisWindow(hwnd, true);
+                    Application.DoEvents();
+                    if (ForegroundIs(hwnd)) { how = "sttw#" + (i + 1); break; }
+                }
+                if (how != null)
+                {
+                    NativeMethods.SetFocus(hwnd);
+                    Log("  force-fg 0x" + hwnd.ToInt64().ToString("X") + " via " + how
+                        + (attached ? " (attached)" : ""));
+                    return true;
+                }
+                IntPtr stuck = NativeMethods.GetForegroundWindow();
+                Log("  force-fg 0x" + hwnd.ToInt64().ToString("X") + " FAILED x4, fg stuck at 0x"
+                    + stuck.ToInt64().ToString("X") + " [" + ClassNameOf(stuck) + "] \""
+                    + GetWindowTitle(stuck) + "\"");
+                return false;
             }
-            catch { }
+            catch { return false; }
+            finally
+            {
+                if (attached) NativeMethods.AttachThreadInput(myThread, fgThread, false);
+            }
         }
 
         // ================= chrome rendering (UpdateLayeredWindow, Hopper-style) =================
@@ -930,13 +1261,13 @@ namespace AltTabSwitcher
             bool light = LightTheme();
             Color accent = AccentColor();
 
-            IntPtr screenDc = GetDC(IntPtr.Zero);
-            var bmi = new BITMAPINFOHEADER();
-            bmi.biSize = Marshal.SizeOf(typeof(BITMAPINFOHEADER));
+            IntPtr screenDc = NativeMethods.GetDC(IntPtr.Zero);
+            var bmi = new NativeMethods.BITMAPINFOHEADER();
+            bmi.biSize = Marshal.SizeOf(typeof(NativeMethods.BITMAPINFOHEADER));
             bmi.biWidth = w; bmi.biHeight = -h; bmi.biPlanes = 1; bmi.biBitCount = 32; bmi.biCompression = 0;
             IntPtr bits;
-            IntPtr dib = CreateDIBSection(screenDc, ref bmi, 0, out bits, IntPtr.Zero, 0);
-            if (dib == IntPtr.Zero) { ReleaseDC(IntPtr.Zero, screenDc); return; }
+            IntPtr dib = NativeMethods.CreateDIBSection(screenDc, ref bmi, 0, out bits, IntPtr.Zero, 0);
+            if (dib == IntPtr.Zero) { NativeMethods.ReleaseDC(IntPtr.Zero, screenDc); return; }
 
             try
             {
@@ -946,8 +1277,8 @@ namespace AltTabSwitcher
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
 
-                    var panelPath = RoundRect(0, 0, w, h, Scaled(_scale, 8));
-                    using (var pen = new Pen(PanelStrokeC(light), Math.Max(1, Scaled(_scale, 1))))
+                    var panelPath = RoundRect(0, 0, w, h, Logic.Scaled(_scale, 8));
+                    using (var pen = new Pen(PanelStrokeC(light), Math.Max(1, Logic.Scaled(_scale, 1))))
                         g.DrawPath(pen, panelPath);
                     panelPath.Dispose();
 
@@ -956,13 +1287,13 @@ namespace AltTabSwitcher
                     for (int i = _pageStart, slot = 0; i < pageEnd; ++i, ++slot)
                     {
                         var app = _apps[i];
-                        RECT tile = TileRect(ref _layout, slot);
+                        NativeMethods.RECT tile = Logic.TileRect(ref _layout, slot);
                         bool sel = i == _index;
-                        RECT pv = PreviewRect(ref _layout, tile);
+                        NativeMethods.RECT pv = Logic.PreviewRect(ref _layout, tile);
 
                         GraphicsPath cardPath = RoundRect(tile.Left, tile.Top, tile.Right, tile.Bottom, _layout.radius);
                         using (var b = new SolidBrush(CardColor(light))) g.FillPath(b, cardPath);
-                        using (var p = new Pen(CardStrokeC(light), Math.Max(1, Scaled(_scale, 1)))) g.DrawPath(p, cardPath);
+                        using (var p = new Pen(CardStrokeC(light), Math.Max(1, Logic.Scaled(_scale, 1)))) g.DrawPath(p, cardPath);
 
                         int pw = pv.Right - pv.Left, ph = pv.Bottom - pv.Top;
                         if (pw > 0 && ph > 0)
@@ -982,16 +1313,16 @@ namespace AltTabSwitcher
                             hole.Dispose();
                         }
 
-                        RECT hdr = HeaderRect(ref _layout, tile);
+                        NativeMethods.RECT hdr = Logic.HeaderRect(ref _layout, tile);
                         int textLeft = hdr.Left;
                         if (app.Icon != null)
                         {
                             int iy = tile.Top + (_layout.headerH - _layout.iconSize) / 2;
                             g.DrawIcon(app.Icon, new Rectangle(hdr.Left, iy, _layout.iconSize, _layout.iconSize));
-                            textLeft = hdr.Left + _layout.iconSize + Scaled(_scale, 8);
+                            textLeft = hdr.Left + _layout.iconSize + Logic.Scaled(_scale, 8);
                         }
                         string title = string.IsNullOrEmpty(app.Title) ? Path.GetFileName(app.Exe) : app.Title;
-                        using (var f = new Font("Segoe UI", Scaled(_scale, 14), GraphicsUnit.Pixel))
+                        using (var f = new Font("Segoe UI", Logic.Scaled(_scale, 14), GraphicsUnit.Pixel))
                         using (var b = new SolidBrush(textClr))
                         {
                             var rect = new RectangleF(textLeft, tile.Top, hdr.Right - textLeft, _layout.headerH);
@@ -1002,13 +1333,13 @@ namespace AltTabSwitcher
 
                         if (sel)
                         {
-                            int gPad = Scaled(_scale, 6), gOut = gPad + Scaled(_scale, 2);
-                            int outerR = Scaled(_scale, 18), innerR = outerR - Scaled(_scale, 2);
+                            int gPad = Logic.Scaled(_scale, 6), gOut = gPad + Logic.Scaled(_scale, 2);
+                            int outerR = Logic.Scaled(_scale, 18), innerR = outerR - Logic.Scaled(_scale, 2);
                             GraphicsPath ringIn = RoundRect(tile.Left - gPad, tile.Top - gPad, tile.Right + gPad, tile.Bottom + gPad, innerR);
                             GraphicsPath ringOut = RoundRect(tile.Left - gOut, tile.Top - gOut, tile.Right + gOut, tile.Bottom + gOut, outerR);
-                            using (var p1 = new Pen(FocusShadowC(light), Math.Max(1, Scaled(_scale, 1))))
+                            using (var p1 = new Pen(FocusShadowC(light), Math.Max(1, Logic.Scaled(_scale, 1))))
                                 g.DrawPath(p1, ringIn);
-                            using (var p2 = new Pen(accent, Math.Max(2, Scaled(_scale, 4))))
+                            using (var p2 = new Pen(accent, Math.Max(2, Logic.Scaled(_scale, 4))))
                                 g.DrawPath(p2, ringOut);
                             ringIn.Dispose(); ringOut.Dispose();
                         }
@@ -1020,7 +1351,7 @@ namespace AltTabSwitcher
                     if (totalPages > 1)
                     {
                         int cur = _pageStart / pageSize + 1;
-                        using (var f = new Font("Segoe UI", Scaled(_scale, 14), GraphicsUnit.Pixel))
+                        using (var f = new Font("Segoe UI", Logic.Scaled(_scale, 14), GraphicsUnit.Pixel))
                         using (var b = new SolidBrush(textClr))
                         {
                             var rect = new RectangleF(_layout.pad, h - _layout.pad, w - 2 * _layout.pad, _layout.pad);
@@ -1032,33 +1363,33 @@ namespace AltTabSwitcher
                     g.Flush(FlushIntention.Sync);
                 }
 
-                IntPtr memDc = CreateCompatibleDC(screenDc);
-                IntPtr old = SelectObject(memDc, dib);
-                var dst = new POINT { X = _layout.panelX, Y = _layout.panelY };
-                var size = new SIZE { cx = w, cy = h };
-                var src = new POINT { X = 0, Y = 0 };
-                var blend = new BLENDFUNCTION { BlendOp = AC_SRC_OVER, BlendFlags = 0, SourceConstantAlpha = 255, AlphaFormat = AC_SRC_ALPHA };
-                bool ulw = UpdateLayeredWindow(_chrome.Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, ULW_ALPHA);
-                SelectObject(memDc, old);
-                DeleteDC(memDc);
+                IntPtr memDc = NativeMethods.CreateCompatibleDC(screenDc);
+                IntPtr old = NativeMethods.SelectObject(memDc, dib);
+                var dst = new NativeMethods.POINT { X = _layout.panelX, Y = _layout.panelY };
+                var size = new NativeMethods.SIZE { cx = w, cy = h };
+                var src = new NativeMethods.POINT { X = 0, Y = 0 };
+                var blend = new NativeMethods.BLENDFUNCTION { BlendOp = NativeMethods.AC_SRC_OVER, BlendFlags = 0, SourceConstantAlpha = 255, AlphaFormat = NativeMethods.AC_SRC_ALPHA };
+                bool ulw = NativeMethods.UpdateLayeredWindow(_chrome.Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, NativeMethods.ULW_ALPHA);
+                NativeMethods.SelectObject(memDc, old);
+                NativeMethods.DeleteDC(memDc);
                 if (ulw)
                 {
                     // UpdateLayeredWindow does NOT make a hidden window visible;
                     // Hopper shows both windows explicitly (SWP_SHOWWINDOW).
-                    SetWindowPos(_chrome.Handle, IntPtr.Zero, 0, 0, 0, 0,
+                    NativeMethods.SetWindowPos(_chrome.Handle, IntPtr.Zero, 0, 0, 0, 0,
                                  0x1 | 0x2 | 0x10 | 0x40 /*NOSIZE|NOMOVE|NOACTIVATE|SHOWWINDOW*/);
                     // keep the opaque panel strictly below the chrome layer
-                    SetWindowPos(_panel.Handle, _chrome.Handle, 0, 0, 0, 0, 0x1 | 0x2 | 0x10);
+                    NativeMethods.SetWindowPos(_panel.Handle, _chrome.Handle, 0, 0, 0, 0, 0x1 | 0x2 | 0x10);
                 }
                 else
                 {
-                    Log("UpdateLayeredWindow failed err=" + Marshal.GetLastWin32Error());
+                    Log("NativeMethods.UpdateLayeredWindow failed err=" + Marshal.GetLastWin32Error());
                 }
             }
             finally
             {
-                DeleteObject(dib);
-                ReleaseDC(IntPtr.Zero, screenDc);
+                NativeMethods.DeleteObject(dib);
+                NativeMethods.ReleaseDC(IntPtr.Zero, screenDc);
             }
         }
 
@@ -1091,39 +1422,48 @@ namespace AltTabSwitcher
         // ================= keyboard hook =================
         static bool AltDown()
         {
-            return (GetAsyncKeyState(VK_LMENU) & 0x8000) != 0
-                || (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0
-                || (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
+            return (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LMENU) & 0x8000) != 0
+                || (NativeMethods.GetAsyncKeyState(NativeMethods.VK_RMENU) & 0x8000) != 0
+                || (NativeMethods.GetAsyncKeyState(NativeMethods.VK_MENU) & 0x8000) != 0;
         }
 
         static bool WinDown()
         {
-            return (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0
-                || (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+            return (NativeMethods.GetAsyncKeyState(NativeMethods.VK_LWIN) & 0x8000) != 0
+                || (NativeMethods.GetAsyncKeyState(NativeMethods.VK_RWIN) & 0x8000) != 0;
         }
 
         static IntPtr KbHookProc(int nCode, IntPtr wParam, IntPtr lParam)
         {
             if (nCode >= 0 && _enabled)
             {
-                var s = (KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(KBDLLHOOKSTRUCT));
-                bool up = (s.flags & LLKHF_UP) != 0;
+                var s = (NativeMethods.KBDLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.KBDLLHOOKSTRUCT));
+                bool up = (s.flags & NativeMethods.LLKHF_UP) != 0;
 
-                if (s.vkCode == VK_TAB && !up && AltDown() && !WinDown())
+                if (s.vkCode == NativeMethods.VK_TAB && !up && AltDown() && !WinDown())
                 {
-                    if (!_session) Post(WM_APP_START);
-                    else Post((GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ? WM_APP_PREV : WM_APP_NEXT);
+                    // Nothing in this callback may do real work (file I/O in
+                    // particular): a low-level hook that exceeds
+                    // LowLevelHooksTimeout (300 ms) is silently removed by
+                    // Windows. The "hotkey" diagnostics are therefore logged
+                    // when the posted message is handled on the UI thread
+                    // (see HandleAppMsg), which also proves the whole
+                    // hook -> post -> dispatch chain, not just the hook.
+                    if (!_session) Post(NativeMethods.WM_APP_START);
+                    else Post((NativeMethods.GetAsyncKeyState(NativeMethods.VK_SHIFT) & 0x8000) != 0 ? NativeMethods.WM_APP_PREV : NativeMethods.WM_APP_NEXT);
                     return (IntPtr)1;
                 }
-                if (_session && s.vkCode == VK_ESCAPE)
+                if (_session && s.vkCode == NativeMethods.VK_ESCAPE)
                 {
-                    if (up) Post(WM_APP_CANCEL);
+                    if (up) Post(NativeMethods.WM_APP_CANCEL);
                     return (IntPtr)1;
                 }
-                if (_session && (s.vkCode == VK_MENU || s.vkCode == VK_LMENU || s.vkCode == VK_RMENU) && up)
-                    Post(WM_APP_COMMIT);   // let the Alt release through
+                if (_session && (s.vkCode == NativeMethods.VK_MENU || s.vkCode == NativeMethods.VK_LMENU || s.vkCode == NativeMethods.VK_RMENU) && up)
+                {
+                    Post(NativeMethods.WM_APP_COMMIT);   // let the Alt release through
+                }
             }
-            return CallNextHookEx(_hook, nCode, wParam, lParam);
+            return NativeMethods.CallNextHookEx(_hook, nCode, wParam, lParam);
         }
 
         // ================= mouse hook =================
@@ -1132,8 +1472,8 @@ namespace AltTabSwitcher
             if (nCode >= 0 && _session && _enabled)
             {
                 int msg = wParam.ToInt32();
-                var s = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
-                if (msg == WM_LBUTTONDOWN)
+                var s = (NativeMethods.MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(NativeMethods.MSLLHOOKSTRUCT));
+                if (msg == NativeMethods.WM_LBUTTONDOWN)
                 {
                     bool insidePanel = s.pt.X >= _panelRect.Left && s.pt.X < _panelRect.Right
                                     && s.pt.Y >= _panelRect.Top && s.pt.Y < _panelRect.Bottom;
@@ -1142,34 +1482,34 @@ namespace AltTabSwitcher
                         int slot = SlotAtPhysical(s.pt.X, s.pt.Y);
                         if (slot >= 0)
                         {
-                            PostAt(WM_APP_COMMITAT, _pageStart + slot);
+                            PostAt(NativeMethods.WM_APP_COMMITAT, _pageStart + slot);
                             return (IntPtr)1;
                         }
                         return IntPtr.Zero;   // panel background: ignore
                     }
-                    Post(WM_APP_CANCEL);
+                    Post(NativeMethods.WM_APP_CANCEL);
                     return (IntPtr)1;         // swallow outside clicks
                 }
-                if (msg == WM_MOUSEWHEEL)
+                if (msg == NativeMethods.WM_MOUSEWHEEL)
                 {
                     short delta = (short)((s.mouseData >> 16) & 0xFFFF);
-                    Post(delta > 0 ? WM_APP_PREV : WM_APP_NEXT);
+                    Post(delta > 0 ? NativeMethods.WM_APP_PREV : NativeMethods.WM_APP_NEXT);
                     return (IntPtr)1;
                 }
             }
-            return CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+            return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
         }
 
         static void InstallMouseHook()
         {
-            _panelRect = new RECT { Left = _layout.panelX, Top = _layout.panelY, Right = _layout.panelX + _layout.panelW, Bottom = _layout.panelY + _layout.panelH };
+            _panelRect = new NativeMethods.RECT { Left = _layout.panelX, Top = _layout.panelY, Right = _layout.panelX + _layout.panelW, Bottom = _layout.panelY + _layout.panelH };
             if (_mouseHook == IntPtr.Zero)
-                _mouseHook = SetWindowsHookEx(WH_MOUSE_LL, _mouseHookProc, GetModuleHandle(null), 0);
+                _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _mouseHookProc, NativeMethods.GetModuleHandle(null), 0);
         }
 
         static void UninstallMouseHook()
         {
-            if (_mouseHook != IntPtr.Zero) { UnhookWindowsHookEx(_mouseHook); _mouseHook = IntPtr.Zero; }
+            if (_mouseHook != IntPtr.Zero) { NativeMethods.UnhookWindowsHookEx(_mouseHook); _mouseHook = IntPtr.Zero; }
         }
 
         static int SlotAtPhysical(int px, int py)
@@ -1177,7 +1517,7 @@ namespace AltTabSwitcher
             int lx = px - _panelRect.Left, ly = py - _panelRect.Top;
             for (int slot = 0; slot < _layout.pageSize; slot++)
             {
-                RECT t = TileRect(ref _layout, slot);
+                NativeMethods.RECT t = Logic.TileRect(ref _layout, slot);
                 if (lx >= t.Left && lx < t.Right && ly >= t.Top && ly < t.Bottom)
                     return slot;
             }
@@ -1219,7 +1559,7 @@ namespace AltTabSwitcher
                 if (a == "--log")
                     _log = new StreamWriter(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "alttabswitcher.log"), false);
 
-            SetProcessDPIAware();
+            NativeMethods.SetProcessDPIAware();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
@@ -1227,15 +1567,20 @@ namespace AltTabSwitcher
             IntPtr hMsg = _msg.Handle;
             _panel = new PanelForm();
             _chrome = new ChromeForm();
+            // Record our own handles so a stray foreground window in the commit
+            // log can be told apart from one of ours.
+            Log("our windows: msg=0x" + hMsg.ToInt64().ToString("X")
+                + " panel=0x" + _panel.Handle.ToInt64().ToString("X")
+                + " chrome=0x" + _chrome.Handle.ToInt64().ToString("X"));
 
-            try { _vdm = (IVirtualDesktopManager)new VirtualDesktopManagerClass(); }
+            try { _vdm = (NativeMethods.IVirtualDesktopManager)new NativeMethods.VirtualDesktopManagerClass(); }
             catch { _vdm = null; }
 
             _hookProc = KbHookProc;
             _mouseHookProc = MouseHookProc;
             using (var cur = Process.GetCurrentProcess())
             using (var mod = cur.MainModule)
-                _hook = SetWindowsHookEx(WH_KEYBOARD_LL, _hookProc, GetModuleHandle(mod.ModuleName), 0);
+                _hook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_KEYBOARD_LL, _hookProc, NativeMethods.GetModuleHandle(mod.ModuleName), 0);
 
             var menu = new ContextMenu();
             var miToggle = new MenuItem("Enabled");
@@ -1271,10 +1616,11 @@ namespace AltTabSwitcher
             exitTimer.Tick += delegate
             {
                 if (!_exitRequested) return;
+                if (_committing) return;   // a commit is mid-flight; retry next tick
                 EndSession();
                 exitTimer.Stop();
                 icon.Visible = false;
-                if (_hook != IntPtr.Zero) UnhookWindowsHookEx(_hook);
+                if (_hook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(_hook);
                 Application.Exit();
             };
             exitTimer.Start();

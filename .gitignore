@@ -7,3 +7,6 @@ AltTabSwitcher.exe
 
 # local junk
 Thumbs.db
+
+# WorkBuddy session data
+.workbuddy/

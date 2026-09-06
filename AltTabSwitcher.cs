@@ -419,6 +419,8 @@ namespace AltTabSwitcher
             public string Title;
             public Icon Icon;      // shared handle (window icons) or owned clone
             public IntPtr Thumb = IntPtr.Zero;
+            public int Rank;       // Z-order rank of the representative window
+            public bool Topmost;   // representative window is WS_EX_TOPMOST
         }
 
         static IntPtr _hook = IntPtr.Zero;
@@ -621,6 +623,14 @@ namespace AltTabSwitcher
             return 1.0;
         }
 
+        // foreground app gets -1 (always first); non-topmost apps keep their
+        // Z-order rank; topmost apps are offset past every non-topmost one
+        static int AppSortKey(AppEntry e, IntPtr fg)
+        {
+            if (e.ReprHwnd == fg) return -1;
+            return (e.Topmost ? 0x40000000 : 0) + e.Rank;
+        }
+
         static void StartSession()
         {
             IntPtr fg = GetForegroundWindow();
@@ -631,16 +641,28 @@ namespace AltTabSwitcher
 
             var order = new List<AppEntry>();
             var byExe = new Dictionary<string, AppEntry>();
+            int rank = 0;
             EnumWindows(delegate(IntPtr hwnd, IntPtr lp)
             {
-                if (!AltTabEligible(hwnd)) return true;
-                if (!OnCurrentDesktop(hwnd)) return true;
+                if (!AltTabEligible(hwnd)) { rank++; return true; }
+                if (!OnCurrentDesktop(hwnd)) { rank++; return true; }
                 string exe = WindowExe(hwnd);
-                if (exe == null) return true;
+                if (exe == null) { rank++; return true; }
                 AppEntry e;
                 if (!byExe.TryGetValue(exe, out e))
                 {
-                    e = new AppEntry { Exe = exe, ReprHwnd = hwnd };
+                    e = new AppEntry
+                    {
+                        Exe = exe,
+                        ReprHwnd = hwnd,
+                        Rank = rank,
+                        // topmost windows sit at the head of the raw Z-order but
+                        // usually haven't been activated recently (PowerToys
+                        // CropAndLock crops, always-on-top tools, ...); sorting
+                        // them raw would let one stale overlay hog the top of
+                        // every Alt+Tab cycle, so they are demoted below
+                        Topmost = (GetWindowLong(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0
+                    };
                     var t = new StringBuilder(256);
                     GetWindowTextW(hwnd, t, 256);
                     e.Title = t.ToString();
@@ -655,13 +677,22 @@ namespace AltTabSwitcher
             _scale = MonitorScale(fg, out work);
             ComputeLayout(work, order.Count, _scale, ref _layout);
 
-            int fgIdx = 0;
-            for (int i = 0; i < order.Count; i++)
-                if (order[i].ReprHwnd == fg) { fgIdx = i; break; }
-            if (fgIdx != 0) { var e = order[fgIdx]; order.RemoveAt(fgIdx); order.Insert(0, e); }
+            // foreground app first, then MRU-ish Z-order with topmost apps last
+            // (their raw Z-order position is meaningless: topmost windows are
+            // always painted above everything else regardless of activation)
             _apps = order;
+            _apps.Sort(delegate(AppEntry a, AppEntry b)
+            {
+                int ka = AppSortKey(a, fg), kb = AppSortKey(b, fg);
+                return ka != kb ? ka.CompareTo(kb) : a.Rank.CompareTo(b.Rank);
+            });
             _index = 1;
             _pageStart = 0;
+
+            var sb2 = new StringBuilder("order:");
+            foreach (var e in _apps)
+                sb2.Append(' ').Append(System.IO.Path.GetFileNameWithoutExtension(e.Exe)).Append(e.Topmost ? "*" : "");
+            Log(sb2.ToString());
 
             foreach (var e in _apps) e.Icon = GetAppIcon(e.ReprHwnd, e.Exe);
 

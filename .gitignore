@@ -1,0 +1,9 @@
+# build output
+AltTabSwitcher.exe
+*.exe
+
+# logs
+*.log
+
+# local junk
+Thumbs.db

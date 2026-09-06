@@ -24,12 +24,6 @@ No more "walking through" five Explorer windows to reach the browser: `Alt+Tab` 
 - **Per-monitor, DPI-aware** — the panel is centered on the monitor of the foreground window, scaled by that monitor's DPI, capped at 6 columns with automatic paging.
 - **Single-file, zero-dependency** — one C# source that builds with the compiler already shipped in Windows. No installer, no runtime to install, green portable exe.
 
-## Why?
-
-Native Windows `Alt+Tab` lists every top-level window, with no way to group by application, and Windows offers no supported way to filter the native list (hiding/cloaking/style tricks all leak into the taskbar or virtual desktops). Existing switchers either replace the whole UI with an icon strip without previews, don't group by app, or don't run on Windows 10.
-
-The clean solution is to own the entire overlay: take over the `Alt+Tab` keystroke, group windows ourselves, and render previews with DWM thumbnails. Porting Window Hopper's UI keeps it visually consistent with the `Alt+\`` half of the workflow.
-
 ## Build
 
 No toolchain to install — Windows ships a C# compiler:

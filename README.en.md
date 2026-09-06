@@ -9,9 +9,9 @@ Two shortcuts, two distinct jobs — exactly like macOS:
 | Shortcut | Switches between | Behavior |
 |---|---|---|
 | `Alt+Tab` | **applications** | one entry per app, MRU order; sibling windows of the focused app never appear, so `Alt+Tab` always lands on a *different* app |
-| `Alt+\`` | **windows of the focused app** | handled by [PowerToys Window Hopper](https://learn.microsoft.com/en-us/windows/powertoys/window-hopper) (or any per-app cycler) |
+| ``Alt+` `` | **windows of the focused app** | handled by [PowerToys Window Hopper](https://learn.microsoft.com/en-us/windows/powertoys/window-hopper) (or any per-app cycler) |
 
-No more "walking through" five Explorer windows to reach the browser: `Alt+Tab` jumps straight to the next *app*, `Alt+\`` cycles inside the current one.
+No more "walking through" five Explorer windows to reach the browser: `Alt+Tab` jumps straight to the next *app*, ``Alt+` `` cycles inside the current one.
 
 ## Highlights
 
@@ -62,7 +62,7 @@ Everything about the app list is computed on the fly each time the switcher open
 
 - [PowerToys Window Hopper (`AltWindowCycle`)](https://github.com/microsoft/PowerToys) — the overlay UI and layout are ported from this module (MIT). Go star PowerToys and check out the rest of it.
 - [alt-tab-macos](https://github.com/lwouis/alt-tab-macos) — the original inspiration for app-level switching with previews.
-- [window-switcher](https://github.com/sigoden/window-switcher) — prior art for `Alt+\``-style per-app cycling.
+- [window-switcher](https://github.com/sigoden/window-switcher) — prior art for ``Alt+` ``-style per-app cycling.
 
 ## License
 

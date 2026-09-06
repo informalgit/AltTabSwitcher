@@ -9,9 +9,9 @@
 | 快捷键 | 在什么之间切换 | 行为 |
 |---|---|---|
 | `Alt+Tab` | **应用** | 每个应用只占一个条目，按最近使用排序；前台应用的兄弟窗口不出现，所以 `Alt+Tab` 永远落在*另一个*应用上 |
-| `Alt+\`` | **前台应用的窗口** | 交给 [PowerToys Window Hopper](https://learn.microsoft.com/zh-cn/windows/powertoys/window-hopper)(或任何应用内切换器)处理 |
+| ``Alt+` `` | **前台应用的窗口** | 交给 [PowerToys Window Hopper](https://learn.microsoft.com/zh-cn/windows/powertoys/window-hopper)(或任何应用内切换器)处理 |
 
-再也不用在五个资源管理器窗口之间"路过"才能到达浏览器：`Alt+Tab` 直接跳到下一个*应用*，`Alt+\`` 在当前应用内部循环
+再也不用在五个资源管理器窗口之间"路过"才能到达浏览器：`Alt+Tab` 直接跳到下一个*应用*，``Alt+` `` 在当前应用内部循环
 
 ## 特性
 
@@ -63,7 +63,7 @@ C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -
 
 - [PowerToys Window Hopper(`AltWindowCycle`)](https://github.com/microsoft/PowerToys) —— 浮层 UI 与布局移植自该模块(MIT)。欢迎给 PowerToys 点星,顺便看看其余的好东西。
 - [alt-tab-macos](https://github.com/lwouis/alt-tab-macos) —— 应用级切换 + 预览的最初灵感来源。
-- [window-switcher](https://github.com/sigoden/window-switcher) —— `Alt+\`` 式应用内切换的先行者。
+- [window-switcher](https://github.com/sigoden/window-switcher) —— ``Alt+` `` 式应用内切换的先行者。
 
 ## 许可证
 

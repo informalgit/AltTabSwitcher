@@ -550,7 +550,13 @@ namespace AltTabSwitcher
             string exe = ExePathOfPid(pid);
             if (exe != null && exe.EndsWith("applicationframehost.exe", StringComparison.OrdinalIgnoreCase))
             {
+                // Prefer the frame's child CoreWindow. When the app is suspended
+                // its window tree is torn down, so fall back to matching a
+                // top-level CoreWindow with the same title (Windows keeps that
+                // window around while the app is backgrounded).
                 IntPtr child = FindWindowByClass(hwnd, "Windows.UI.Core.CoreWindow");
+                if (child == IntPtr.Zero)
+                    child = FindTopLevelCoreWindowByTitle(GetWindowTitle(hwnd));
                 if (child != IntPtr.Zero)
                 {
                     uint cpid;
@@ -563,20 +569,62 @@ namespace AltTabSwitcher
             return exe;
         }
 
+        static string GetWindowTitle(IntPtr hwnd)
+        {
+            var t = new StringBuilder(256);
+            GetWindowTextW(hwnd, t, 256);
+            return t.ToString();
+        }
+
+        static IntPtr FindTopLevelCoreWindowByTitle(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return IntPtr.Zero;
+            IntPtr found = IntPtr.Zero;
+            EnumWindows(delegate(IntPtr h, IntPtr lp)
+            {
+                var cls = new StringBuilder(64);
+                GetClassNameW(h, cls, 64);
+                if (cls.ToString() != "Windows.UI.Core.CoreWindow") return true;
+                if (GetWindowTitle(h) == title) { found = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
+
         // The classic native Alt-Tab predicate (Raymond Chen / PowerToys
         // AltWindowCycle): a window participates only when it is the visible
         // representative of its owner chain - i.e. walking root-owner ->
         // GetLastActivePopup lands back on it (or on a visible popup chain
         // that ends at it). This also catches groups whose main window is
         // minimized while an owned dialog is still visible.
+        static bool IsCloaked(IntPtr hwnd)
+        {
+            int v;
+            return DwmGetWindowAttribute(hwnd, 14 /*DWMWA_CLOAKED*/, out v, 4) == 0 && v != 0;
+        }
+
         static bool AltTabEligible(IntPtr hwnd)
         {
             if (!IsWindowVisible(hwnd)) return false;
-            // cloaked windows are logically visible but never rendered by DWM
-            // (suspended UWP apps, the hidden text-input host, ...); the native
-            // switcher excludes them and so must we
-            int cloaked;
-            if (DwmGetWindowAttribute(hwnd, 14 /*DWMWA_CLOAKED*/, out cloaked, 4) == 0 && cloaked != 0) return false;
+
+            var cls = new StringBuilder(64);
+            GetClassNameW(hwnd, cls, 64);
+            string cn = cls.ToString();
+
+            // frameless UWP system hosts (text input, search, shell dialogs)
+            // never belong in the cycle; real UWP apps live behind an
+            // ApplicationFrameWindow and are handled below
+            if (cn == "Windows.UI.Core.CoreWindow") return false;
+            if (cn == "Progman" || cn == "WorkerW") return false;
+
+            // Cloak rule (native/Hopper parity): any cloaked window is out.
+            // DWM_CLOAKED_SHELL (2) covers windows parked on other virtual
+            // desktops (Windows implements virtual desktops by cloaking);
+            // DWM_CLOAKED_APP (1) covers windows an app hid itself (suspended
+            // UWP helper windows, background UI). A suspended UWP app's frame
+            // itself stays uncloaked, so suspended apps remain listed - and
+            // activating one wakes it.
+            if (IsCloaked(hwnd)) return false;
 
             IntPtr walk = GetAncestor(hwnd, GA_ROOTOWNER);
             for (;;)
@@ -590,12 +638,6 @@ namespace AltTabSwitcher
 
             int ex = GetWindowLong(hwnd, GWL_EXSTYLE);
             if ((ex & WS_EX_TOOLWINDOW) != 0 && (ex & WS_EX_APPWINDOW) == 0) return false;
-
-            // desktop windows and known system hosts never belong in the cycle
-            var cls = new StringBuilder(64);
-            GetClassNameW(hwnd, cls, 64);
-            string cn = cls.ToString();
-            if (cn == "Progman" || cn == "WorkerW") return false;
 
             var title = new StringBuilder(256);
             GetWindowTextW(hwnd, title, 256);
@@ -776,9 +818,14 @@ namespace AltTabSwitcher
                 var app = _apps[i];
                 RECT tile = TileRect(ref _layout, slot);
                 RECT pv = PreviewRect(ref _layout, tile);
+                app.Thumb = IntPtr.Zero;
+                // minimized and cloaked (suspended) windows have no DWM
+                // thumbnail content; the paint path shows a large icon instead
+                if (IsIconic(app.ReprHwnd) || IsCloaked(app.ReprHwnd)) continue;
                 IntPtr tid;
                 if (DwmRegisterThumbnail(_panel.Handle, app.ReprHwnd, out tid) != 0 || tid == IntPtr.Zero)
                     continue;
+                app.Thumb = tid;
                 _thumbs.Add(tid);
 
                 RECT client = new RECT();

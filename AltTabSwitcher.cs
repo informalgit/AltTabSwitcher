@@ -242,6 +242,8 @@ namespace AltTabSwitcher
         static extern int DwmUnregisterThumbnail(IntPtr hThumbnailId);
         [DllImport("dwmapi.dll")]
         static extern int DwmQueryThumbnailSourceSize(IntPtr hThumbnail, out SIZE psize);
+        [DllImport("dwmapi.dll")]
+        static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
         [DllImport("shcore.dll")]
         static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -557,6 +559,11 @@ namespace AltTabSwitcher
         static bool AltTabEligible(IntPtr hwnd)
         {
             if (!IsWindowVisible(hwnd)) return false;
+            // cloaked windows are logically visible but never rendered by DWM
+            // (suspended UWP apps, the hidden text-input host, ...); the native
+            // switcher excludes them and so must we
+            int cloaked;
+            if (DwmGetWindowAttribute(hwnd, 14 /*DWMWA_CLOAKED*/, out cloaked, 4) == 0 && cloaked != 0) return false;
             int ex = GetWindowLong(hwnd, GWL_EXSTYLE);
             if ((ex & WS_EX_TOOLWINDOW) != 0 && (ex & WS_EX_APPWINDOW) == 0) return false;
             var title = new StringBuilder(256);

@@ -52,6 +52,7 @@ namespace AltTabSwitcher
         const int WS_EX_TOPMOST = 0x00000008;
         const int WS_EX_LAYERED = 0x00080000;
         const uint GW_OWNER = 4;
+        const uint GA_ROOTOWNER = 2;
         const int GCLP_HICONSM = -34;
         const int GCLP_HICON = -14;
         const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
@@ -188,6 +189,12 @@ namespace AltTabSwitcher
         static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")]
         static extern IntPtr GetWindow(IntPtr hWnd, uint nCmd);
+        [DllImport("user32.dll")]
+        static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+        [DllImport("user32.dll")]
+        static extern IntPtr GetLastActivePopup(IntPtr hwnd);
+        [DllImport("user32.dll")]
+        static extern bool IsWindow(IntPtr hWnd);
         [DllImport("user32.dll")]
         static extern bool SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
         [DllImport("gdi32.dll")]
@@ -556,6 +563,12 @@ namespace AltTabSwitcher
             return exe;
         }
 
+        // The classic native Alt-Tab predicate (Raymond Chen / PowerToys
+        // AltWindowCycle): a window participates only when it is the visible
+        // representative of its owner chain - i.e. walking root-owner ->
+        // GetLastActivePopup lands back on it (or on a visible popup chain
+        // that ends at it). This also catches groups whose main window is
+        // minimized while an owned dialog is still visible.
         static bool AltTabEligible(IntPtr hwnd)
         {
             if (!IsWindowVisible(hwnd)) return false;
@@ -564,13 +577,31 @@ namespace AltTabSwitcher
             // switcher excludes them and so must we
             int cloaked;
             if (DwmGetWindowAttribute(hwnd, 14 /*DWMWA_CLOAKED*/, out cloaked, 4) == 0 && cloaked != 0) return false;
+
+            IntPtr walk = GetAncestor(hwnd, GA_ROOTOWNER);
+            for (;;)
+            {
+                IntPtr tryPopup = GetLastActivePopup(walk);
+                if (tryPopup == walk) break;
+                if (IsWindowVisible(tryPopup)) break;
+                walk = tryPopup;
+            }
+            if (walk != hwnd) return false;
+
             int ex = GetWindowLong(hwnd, GWL_EXSTYLE);
             if ((ex & WS_EX_TOOLWINDOW) != 0 && (ex & WS_EX_APPWINDOW) == 0) return false;
+
+            // desktop windows and known system hosts never belong in the cycle
+            var cls = new StringBuilder(64);
+            GetClassNameW(hwnd, cls, 64);
+            string cn = cls.ToString();
+            if (cn == "Progman" || cn == "WorkerW") return false;
+
             var title = new StringBuilder(256);
             GetWindowTextW(hwnd, title, 256);
             if (title.Length == 0) return false;
-            IntPtr owner = GetWindow(hwnd, GW_OWNER);
-            if (owner != IntPtr.Zero && (ex & WS_EX_APPWINDOW) == 0) return false;
+            if (title.ToString() == "Windows Input Experience") return false;
+
             RECT r;
             if (GetWindowRect(hwnd, out r) && r.Right - r.Left <= 1 && r.Bottom - r.Top <= 1) return false;
             return true;
@@ -798,8 +829,11 @@ namespace AltTabSwitcher
             if (_apps.Count == 0) { Cancel(); return; }
             var app = _apps[_index];
             EndSession();
-            ForceForeground(app.ReprHwnd);
-            Log("commit -> 0x" + app.ReprHwnd.ToInt64().ToString("X") + " " + Path.GetFileName(app.Exe));
+            if (IsWindow(app.ReprHwnd))
+            {
+                ForceForeground(app.ReprHwnd);
+                Log("commit -> 0x" + app.ReprHwnd.ToInt64().ToString("X") + " " + Path.GetFileName(app.Exe));
+            }
         }
 
         static void Cancel()
@@ -1175,6 +1209,16 @@ namespace AltTabSwitcher
             icon.Text = "AltTab Switcher - Hopper-style UI, one entry per app";
             icon.ContextMenu = menu;
             icon.Visible = true;
+
+            // Watchdog: if the Alt release never arrives through the hook
+            // (timeout, injection hiccup, focus race), commit anyway instead of
+            // leaving the overlay up and swallowing clicks forever.
+            var sessionWatchdog = new System.Windows.Forms.Timer { Interval = 100 };
+            sessionWatchdog.Tick += delegate
+            {
+                if (_session && !AltDown()) Commit();
+            };
+            sessionWatchdog.Start();
 
             var exitTimer = new System.Windows.Forms.Timer { Interval = 200 };
             exitTimer.Tick += delegate

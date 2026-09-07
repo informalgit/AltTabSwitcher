@@ -222,6 +222,8 @@ namespace AltTabSwitcher
         [DllImport("user32.dll")]
         public static extern IntPtr CopyIcon(IntPtr hIcon);
         [DllImport("user32.dll")]
+        public static extern bool DestroyIcon(IntPtr hIcon);
+        [DllImport("user32.dll")]
         public static extern IntPtr GetParent(IntPtr hWnd);
         // Undocumented but shipped since Windows 2000: the only call that
         // reliably breaks the foreground lock an ApplicationFrameHost holds.
@@ -487,6 +489,64 @@ namespace AltTabSwitcher
         static Color PanelFillC(bool light) { return light ? Color.FromArgb(255, 243, 243, 243) : Color.FromArgb(255, 84, 84, 84); }
         static Color HeaderTextC(bool light) { return light ? Color.FromArgb(255, 26, 26, 26) : Color.FromArgb(255, 235, 235, 235); }
         static Color FocusShadowC(bool light) { return light ? Color.FromArgb(120, 255, 255, 255) : Color.FromArgb(150, 0, 0, 0); }
+
+        // ================= tray icon =================
+        // Drawn at runtime so it follows the OS accent color (same source the
+        // panel's focus ring uses) instead of shipping a .ico asset - keeps the
+        // build single-file and zero-dependency. Redrawn on Personal preference
+        // changes, so a live accent switch recolors the tray too.
+        static Icon _trayIcon;   // NotifyIcon does not own its Icon; keep this alive or the HICON gets finalized away
+
+        static Icon MakeTrayIcon()
+        {
+            int size = 16;
+            try
+            {
+                using (var g = Graphics.FromHwnd(IntPtr.Zero))
+                    size = Math.Max(16, (int)Math.Round(g.DpiX * 16 / 96.0));
+            }
+            catch { }
+            if ((size & 1) == 1) size++;   // even sizes rasterize cleaner
+
+            Color accent = AccentColor();
+            // white-on-accent normally; dark glyph when the accent itself is light (yellows)
+            double lum = (0.299 * accent.R + 0.587 * accent.G + 0.114 * accent.B) / 255.0;
+            Color glyph = lum > 0.55 ? Color.FromArgb(24, 24, 24) : Color.White;
+
+            using (var bmp = new Bitmap(size, size))
+            using (var g2 = Graphics.FromImage(bmp))
+            {
+                g2.SmoothingMode = SmoothingMode.AntiAlias;
+                float r = size * 0.24f;
+                float m = 0.5f;   // keeps the AA edge off the bitmap border
+                using (var path = new GraphicsPath())
+                {
+                    path.AddArc(m, m, 2 * r, 2 * r, 180, 90);
+                    path.AddArc(size - m - 2 * r, m, 2 * r, 2 * r, 270, 90);
+                    path.AddArc(size - m - 2 * r, size - m - 2 * r, 2 * r, 2 * r, 0, 90);
+                    path.AddArc(m, size - m - 2 * r, 2 * r, 2 * r, 90, 90);
+                    path.CloseFigure();
+                    using (var b = new SolidBrush(accent))
+                        g2.FillPath(b, path);
+                }
+                float w = Math.Max(2f, size * 0.14f);   // shaft thickness
+                float inset = size * 0.22f;
+                using (var pen = new Pen(glyph, w))
+                {
+                    pen.StartCap = LineCap.Round;
+                    pen.EndCap = LineCap.Custom;
+                    pen.CustomEndCap = new AdjustableArrowCap(w, w * 2.0f, true);
+                    g2.DrawLine(pen, inset, size * 0.36f, size - inset, size * 0.36f);   // ->
+                    pen.EndCap = LineCap.Round;
+                    pen.StartCap = LineCap.Custom;
+                    pen.CustomStartCap = new AdjustableArrowCap(w, w * 2.0f, true);
+                    g2.DrawLine(pen, inset, size * 0.64f, size - inset, size * 0.64f);   // <-
+                }
+                IntPtr h = bmp.GetHicon();
+                try { return (Icon)Icon.FromHandle(h).Clone(); }
+                finally { NativeMethods.DestroyIcon(h); }
+            }
+        }
 
         // ================= state =================
         static IntPtr _hook = IntPtr.Zero;
@@ -1597,10 +1657,24 @@ namespace AltTabSwitcher
             menu.MenuItems.Add(miExit);
 
             var icon = new NotifyIcon();
-            icon.Icon = SystemIcons.Application;
+            _trayIcon = MakeTrayIcon();
+            icon.Icon = _trayIcon;
             icon.Text = "AltTab Switcher - Hopper-style UI, one entry per app";
             icon.ContextMenu = menu;
             icon.Visible = true;
+
+            // Recolor the tray icon when the user changes the accent color or
+            // theme, so it always matches the panel's accent. (Accent/theme
+            // changes surface as Color or General; redraw on either.)
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged += delegate(object s, Microsoft.Win32.UserPreferenceChangedEventArgs e)
+            {
+                var cat = e.Category;
+                if (cat != Microsoft.Win32.UserPreferenceCategory.Color && cat != Microsoft.Win32.UserPreferenceCategory.General) return;
+                Icon old = _trayIcon;
+                _trayIcon = MakeTrayIcon();
+                icon.Icon = _trayIcon;
+                if (old != null) old.Dispose();
+            };
 
             // Watchdog: if the Alt release never arrives through the hook
             // (timeout, injection hiccup, focus race), commit anyway instead of

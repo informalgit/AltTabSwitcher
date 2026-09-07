@@ -404,17 +404,13 @@ namespace AltTabSwitcher
         }
 
 
-        // foreground app gets -1 (always first); non-topmost apps keep their
-        // Z-order rank; topmost apps are offset past every non-topmost one
-        public static int AppSortKey(AppEntry e, IntPtr fg, string fgExe)
+        // The pinned entry (the current one) sorts first; non-topmost apps keep
+        // their Z-order rank; topmost apps are offset past every non-topmost
+        // one. Which entry is pinned is decided once by the caller, so exactly
+        // one entry can ever sit in slot 0.
+        public static int AppSortKey(AppEntry e, IntPtr pin)
         {
-            if (e.ReprHwnd == fg) return -1;
-            // GetForegroundWindow() does not necessarily return the group's
-            // representative (a UWP app may report its CoreWindow, a minimized
-            // group reports an owned popup), so match the foreground
-            // *application* too. Without this the foreground app is not pinned
-            // to slot 0, and Alt+Tab lands one app further back than it should.
-            if (fgExe != null && string.Equals(e.Exe, fgExe, StringComparison.OrdinalIgnoreCase)) return -1;
+            if (e.ReprHwnd == pin) return -1;
             return (e.Topmost ? TopmostSortOffset : 0) + e.Rank;
         }
     }
@@ -431,6 +427,11 @@ namespace AltTabSwitcher
         public IntPtr Thumb = IntPtr.Zero;
         public int Rank;       // Z-order rank of the representative window
         public bool Topmost;   // representative window is WS_EX_TOPMOST
+        // WS_EX_APPWINDOW: the window asked the shell for its own taskbar /
+        // switcher entry, so it is kept apart instead of being merged into the
+        // entry of its exe. It represents itself and nothing else, so it can
+        // only be pinned as "current" by handle, never by exe.
+        public bool OwnEntry;
     }
 
     static class Program
@@ -952,26 +953,40 @@ namespace AltTabSwitcher
                 // The predicate already vetted that an exe resolves; re-resolve
                 // here to obtain the value itself.
                 string exe = WindowExe(hwnd);
+                int ex = NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE);
+                // WS_EX_APPWINDOW is how a window asks the shell for a taskbar
+                // / switcher entry of its own (Explorer folder Properties, Save
+                // As and Preferences dialogs, extra document windows, ...).
+                // Windows' own Alt+Tab lists those separately, and so do we:
+                // keying them per window keeps them reachable instead of being
+                // swallowed by the single entry of their exe - an Explorer
+                // Properties dialog could otherwise never be switched to.
+                bool ownEntry = (ex & NativeMethods.WS_EX_APPWINDOW) != 0;
+                string key = ownEntry ? exe + "|" + hwnd.ToInt64().ToString("X") : exe;
                 AppEntry e;
-                if (!byExe.TryGetValue(exe, out e))
+                if (!byExe.TryGetValue(key, out e))
                 {
                     e = new AppEntry
                     {
                         Exe = exe,
                         ReprHwnd = hwnd,
                         Rank = myRank,
+                        OwnEntry = ownEntry,
                         // topmost windows sit at the head of the raw Z-order but
                         // usually haven't been activated recently (PowerToys
                         // CropAndLock crops, always-on-top tools, ...); sorting
                         // them raw would let one stale overlay hog the top of
                         // every Alt+Tab cycle, so they are demoted below
-                        Topmost = (NativeMethods.GetWindowLong(hwnd, NativeMethods.GWL_EXSTYLE) & NativeMethods.WS_EX_TOPMOST) != 0
+                        Topmost = (ex & NativeMethods.WS_EX_TOPMOST) != 0
                     };
                     var t = new StringBuilder(256);
                     NativeMethods.GetWindowTextW(hwnd, t, 256);
                     e.Title = t.ToString();
-                    byExe[exe] = e;
+                    byExe[key] = e;
                     order.Add(e);
+                    if (ownEntry && _log != null)
+                        Log("  own entry (WS_EX_APPWINDOW) 0x" + hwnd.ToInt64().ToString("X")
+                            + " \"" + e.Title + "\"");
                 }
                 return true;
             }, IntPtr.Zero);
@@ -985,13 +1000,30 @@ namespace AltTabSwitcher
             _scale = MonitorScale(fg, out work);
             Logic.ComputeLayout(work, order.Count, _scale, ref _layout);
 
-            // foreground app first, then MRU-ish Z-order with topmost apps last
+            // Exactly one entry is pinned as "current": first the one that *is*
+            // the foreground window, else - GetForegroundWindow() does not
+            // necessarily return a group's representative (a UWP app reports its
+            // CoreWindow, a minimized group reports an owned popup) - the group
+            // the foreground window belongs to. Split entries stand for their
+            // own window only, so they are never pinned by exe: with an
+            // Explorer dialog in front, both it and the Explorer group would
+            // otherwise claim slot 0 and Alt+Tab would preselect the dialog
+            // itself.
+            IntPtr pin = IntPtr.Zero;
+            foreach (var e in order)
+                if (e.ReprHwnd == fg) { pin = fg; break; }
+            if (pin == IntPtr.Zero)
+                foreach (var e in order)
+                    if (!e.OwnEntry && string.Equals(e.Exe, fgExe, StringComparison.OrdinalIgnoreCase))
+                    { pin = e.ReprHwnd; break; }
+
+            // pinned app first, then MRU-ish Z-order with topmost apps last
             // (their raw Z-order position is meaningless: topmost windows are
             // always painted above everything else regardless of activation)
             _apps = order;
             _apps.Sort(delegate(AppEntry a, AppEntry b)
             {
-                int ka = Logic.AppSortKey(a, fg, fgExe), kb = Logic.AppSortKey(b, fg, fgExe);
+                int ka = Logic.AppSortKey(a, pin), kb = Logic.AppSortKey(b, pin);
                 return ka != kb ? ka.CompareTo(kb) : a.Rank.CompareTo(b.Rank);
             });
             // Preselect the app the user last used. Slot 0 is the foreground app
@@ -999,7 +1031,7 @@ namespace AltTabSwitcher
             // window is not in the cycle at all) slot 0 is already the most
             // recently used other app, and starting at 1 would skip it - which
             // is exactly the "Alt+Tab goes one app too far back" symptom.
-            bool fgPinned = Logic.AppSortKey(_apps[0], fg, fgExe) == -1;
+            bool fgPinned = pin != IntPtr.Zero;
             _index = fgPinned ? 1 : 0;
             _pageStart = 0;
             Log("fgPinned=" + fgPinned + " index=" + _index);

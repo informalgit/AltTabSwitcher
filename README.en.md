@@ -26,7 +26,9 @@ No more "walking through" five Explorer windows to reach the browser: `Alt+Tab` 
 
 ## Build
 
-No toolchain to install — Windows ships a C# compiler:
+No toolchain to install — Windows ships a C# compiler. **The easiest route: double-click `build.bat` in the repository** — it terminates any running instance and embeds `app.manifest` so the resulting exe requests administrator privileges on launch. If an elevated instance is already running, quit it from the tray first; the locked output file would break the build.
+
+Or run the compiler manually:
 
 ```bat
 C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -platform:anycpu -optimize+ ^

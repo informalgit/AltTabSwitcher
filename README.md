@@ -27,16 +27,13 @@
 
 ## 构建
 
-无需安装任何工具链——Windows 自带 C# 编译器。**最简单的做法:双击仓库里的 `build.bat`**,它会先结束正在运行的实例,并嵌入 `app.manifest`,使生成的 exe 启动时自动申请管理员权限;若已有实例正以管理员权限运行,请先从托盘退出,否则输出文件被占用会导致编译失败。
-
-手动执行等价命令:
-
-```bat
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -platform:anycpu -optimize+ ^
-  -r:System.dll -r:System.Core.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll ^
-  -out:AltTabSwitcher.exe AltTabSwitcher.cs
-```
-
+1. **最简单的做法：双击仓库里的 `build.bat`**，它会先结束正在运行的实例，并嵌入 `app.manifest`，使生成的 exe 启动时自动申请管理员权限；若已有实例正以管理员权限运行，**请先从托盘退出**，否则输出文件被占用会导致编译失败。
+2. 手动执行等价命令:
+    ```bat
+    C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -platform:anycpu -optimize+ ^
+      -r:System.dll -r:System.Core.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll ^
+      -out:AltTabSwitcher.exe AltTabSwitcher.cs
+    ```
 适用于 Windows 10 和 11。
 
 ## 使用

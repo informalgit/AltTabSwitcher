@@ -417,9 +417,13 @@ namespace AltTabSwitcher
             if (totalRows < 1) totalRows = 1;
             L.rows = Math.Min(totalRows, rowsFromWork);
             if (L.rows < 1) L.rows = 1;
-            L.cols = colsMax;
             L.pageSize = Math.Min(count, L.rows * colsMax);
             if (L.pageSize < 0) L.pageSize = 0;
+            // The panel is only as wide as the WIDEST ROW THAT IS ACTUALLY
+            // USED - never the column limit. Two windows must give a
+            // two-tile-wide bar, not a six-tile-wide one with four tiles'
+            // worth of empty background on both sides.
+            L.cols = Math.Min(colsMax, L.pageSize);
 
             L.rowCount = new int[L.rows];
             L.rowX = new int[L.rows];

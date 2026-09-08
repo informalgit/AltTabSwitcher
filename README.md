@@ -1,6 +1,6 @@
 [English](README.en.md) | 简体中文
 
-# AltTabSwitcher
+# AppHopper
 
 **Windows 上的应用级 `Alt+Tab`，外观 UI 来自 PowerToys Window Hopper**
 
@@ -32,13 +32,13 @@
     ```bat
     C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -platform:anycpu -optimize+ ^
       -r:System.dll -r:System.Core.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll ^
-      -out:AltTabSwitcher.exe AltTabSwitcher.cs
+      -out:AppHopper.exe AppHopper.cs
     ```
 适用于 Windows 10 和 11。
 
 ## 使用
 
-运行 `AltTabSwitcher.exe`——托盘出现图标(右键:*Enabled*、*Start with Windows*、*Exit*)。然后:
+运行 `AppHopper.exe`——托盘出现图标(右键:*Enabled*、*Start with Windows*、*Exit*)。然后:
 
 | 输入 | 动作 |
 |---|---|
@@ -49,7 +49,7 @@
 | 点击某张卡片 | 立即切换到该应用 |
 | 鼠标滚轮 | 循环选择 |
 
-应用列表每次打开切换器时实时计算,没有任何需要配置的选项。诊断:以 `--log` 参数启动,会在 exe 旁生成 `alttabswitcher.log`。
+应用列表每次打开切换器时实时计算,没有任何需要配置的选项。诊断:以 `--log` 参数启动,会在 exe 旁生成 `apphopper.log`。
 
 ## 实现原理(简版)
 

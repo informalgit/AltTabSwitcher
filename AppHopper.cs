@@ -1,4 +1,4 @@
-// AltTabSwitcher - macOS-AltTab-style application switcher for Windows.
+// AppHopper - macOS-AltTab-style application switcher for Windows.
 // Alt+Tab is fully taken over: one entry per application (grouped by exe,
 // Z-order MRU), live DWM thumbnails, click an entry to switch, click outside /
 // press Esc to cancel, hold Alt and tap Tab to cycle, Shift+Tab reverses.
@@ -24,7 +24,7 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace AltTabSwitcher
+namespace AppHopper
 {
     // ================= Win32 interop =================
     // Every P/Invoke declaration, Win32 constant, struct and COM import,
@@ -1912,8 +1912,8 @@ namespace AltTabSwitcher
             {
                 using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", true))
                 {
-                    if (add) key.SetValue("AltTabSwitcher", "\"" + Application.ExecutablePath + "\"");
-                    else if (key.GetValue("AltTabSwitcher") != null) key.DeleteValue("AltTabSwitcher");
+                    if (add) key.SetValue("AppHopper", "\"" + Application.ExecutablePath + "\"");
+                    else if (key.GetValue("AppHopper") != null) key.DeleteValue("AppHopper");
                 }
             }
             catch { }
@@ -1924,7 +1924,7 @@ namespace AltTabSwitcher
             try
             {
                 using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run"))
-                    return key != null && key.GetValue("AltTabSwitcher") != null;
+                    return key != null && key.GetValue("AppHopper") != null;
             }
             catch { return false; }
         }
@@ -1933,12 +1933,12 @@ namespace AltTabSwitcher
         static void Main(string[] args)
         {
             bool created;
-            _mutex = new Mutex(true, "Local\\AltTabSwitcher", out created);
+            _mutex = new Mutex(true, "Local\\AppHopper", out created);
             if (!created) return;
 
             foreach (string a in args)
                 if (a == "--log")
-                    _log = new StreamWriter(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "alttabswitcher.log"), false);
+                    _log = new StreamWriter(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "apphopper.log"), false);
 
             NativeMethods.SetProcessDPIAware();
             Application.EnableVisualStyles();
@@ -1980,7 +1980,7 @@ namespace AltTabSwitcher
             var icon = new NotifyIcon();
             _trayIcon = MakeTrayIcon();
             icon.Icon = _trayIcon;
-            icon.Text = "AltTab Switcher - Hopper-style UI, one entry per app";
+            icon.Text = "AppHopper - one entry per app";
             icon.ContextMenu = menu;
             icon.Visible = true;
 

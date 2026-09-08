@@ -1,6 +1,6 @@
 English | [简体中文](README.md)
 
-# AltTabSwitcher
+# AppHopper
 
 **App-level `Alt+Tab` for Windows, styled after PowerToys Window Hopper.**
 
@@ -31,13 +31,13 @@ No more "walking through" five Explorer windows to reach the browser: `Alt+Tab` 
     ```bat
     C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe -nologo -target:winexe -platform:anycpu -optimize+ ^
       -r:System.dll -r:System.Core.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll ^
-      -out:AltTabSwitcher.exe AltTabSwitcher.cs
+      -out:AppHopper.exe AppHopper.cs
     ```
 Works on Windows 10 and 11.
 
 ## Usage
 
-Run `AltTabSwitcher.exe` — a tray icon appears (right-click: *Enabled*, *Start with Windows*, *Exit*). Then:
+Run `AppHopper.exe` — a tray icon appears (right-click: *Enabled*, *Start with Windows*, *Exit*). Then:
 
 | Input | Action |
 |---|---|
@@ -48,7 +48,7 @@ Run `AltTabSwitcher.exe` — a tray icon appears (right-click: *Enabled*, *Start
 | click a card | switch to that app immediately |
 | mouse wheel | cycle |
 
-Everything about the app list is computed on the fly each time the switcher opens; there is nothing to configure. Diagnostics: launch with `--log` to write `alttabswitcher.log` next to the exe.
+Everything about the app list is computed on the fly each time the switcher opens; there is nothing to configure. Diagnostics: launch with `--log` to write `apphopper.log` next to the exe.
 
 ## How it works (short version)
 

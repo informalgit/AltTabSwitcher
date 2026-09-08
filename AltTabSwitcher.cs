@@ -322,14 +322,37 @@ namespace AltTabSwitcher
             public int pad, gap, tileW, tileH, headerH, previewH, inner, radius, iconSize;
             public int cols, rows, pageSize;
             public int panelX, panelY, panelW, panelH;
+            // Row geometry. rowCount[r] = how many tiles row r holds, rowX[r]
+            // that row's left edge. Rows are filled one at a time - the last
+            // one is the only short one - but every row is centred, so a
+            // short last row leaves its slack split on both sides instead of
+            // one ragged right edge.
+            public int[] rowCount;
+            public int[] rowX;
         }
 
         public static int Scaled(double scale, int v) { return (int)(v * scale + 0.5); }
 
         public static NativeMethods.RECT TileRect(ref OverlayLayout L, int index)
         {
-            int col = index % L.cols, row = index / L.cols;
-            int left = L.pad + col * (L.tileW + L.gap);
+            int row, col;
+            if (L.rowCount != null && L.rows > 0)
+            {
+                row = L.rows - 1;
+                col = index;
+                for (int r = 0; r < L.rows; r++)
+                {
+                    if (col < L.rowCount[r]) { row = r; break; }
+                    col -= L.rowCount[r];
+                }
+            }
+            else
+            {
+                int c = L.cols > 0 ? L.cols : 1;
+                row = index / c;
+                col = index % c;
+            }
+            int left = (L.rowX != null && row < L.rowX.Length ? L.rowX[row] : L.pad) + col * (L.tileW + L.gap);
             int top = L.pad + row * (L.tileH + L.gap);
             return new NativeMethods.RECT { Left = left, Top = top, Right = left + L.tileW, Bottom = top + L.tileH };
         }
@@ -380,15 +403,34 @@ namespace AltTabSwitcher
             int count = windowCount < 0 ? 0 : windowCount;
             int colsFromWork = (workW - 2 * L.pad + L.gap) / (L.tileW + L.gap);
             if (colsFromWork < 1) colsFromWork = 1;
-            L.cols = Math.Min(count, Math.Min(MaxColumns, colsFromWork));
-            if (L.cols < 1) L.cols = 1;
+            int colsMax = Math.Min(MaxColumns, colsFromWork);
+            if (colsMax < 1) colsMax = 1;
 
-            int totalRows = (count + L.cols - 1) / L.cols;
             int rowsFromWork = (workH - 2 * L.pad + L.gap) / (L.tileH + L.gap);
             if (rowsFromWork < 1) rowsFromWork = 1;
+
+            // Fill one row completely before starting the next, then centre
+            // each row within the panel: only the last row is ever short, so
+            // it is the only one that moves, and its leftover slack is split
+            // evenly to both sides instead of pooling on the right.
+            int totalRows = (count + colsMax - 1) / colsMax;
+            if (totalRows < 1) totalRows = 1;
             L.rows = Math.Min(totalRows, rowsFromWork);
-            L.pageSize = Math.Min(count, L.cols * L.rows);
-            L.panelW = 2 * L.pad + L.cols * L.tileW + (L.cols - 1) * L.gap;
+            if (L.rows < 1) L.rows = 1;
+            L.cols = colsMax;
+            L.pageSize = Math.Min(count, L.rows * colsMax);
+            if (L.pageSize < 0) L.pageSize = 0;
+
+            L.rowCount = new int[L.rows];
+            L.rowX = new int[L.rows];
+            for (int r = 0; r < L.rows; r++)
+            {
+                int left = L.pageSize - r * colsMax;
+                L.rowCount[r] = left >= colsMax ? colsMax : (left > 0 ? left : 0);
+                L.rowX[r] = L.pad + (L.cols - L.rowCount[r]) * (L.tileW + L.gap) / 2;
+            }
+
+            L.panelW = 2 * L.pad + L.cols * L.tileW + Math.Max(0, L.cols - 1) * L.gap;
             L.panelH = 2 * L.pad + L.rows * L.tileH + Math.Max(0, L.rows - 1) * L.gap;
             L.panelX = work.Left + (workW - L.panelW) / 2;
             L.panelY = work.Top + (workH - L.panelH) / 2;
@@ -427,6 +469,11 @@ namespace AltTabSwitcher
         public IntPtr Thumb = IntPtr.Zero;
         public int Rank;       // Z-order rank of the representative window
         public bool Topmost;   // representative window is WS_EX_TOPMOST
+        // Stable identity across re-enumerations: the exe path, or
+        // "exe|hwnd" for a window that owns its own entry. The in-session
+        // refresh matches entries on this, so a surviving entry keeps its
+        // slot even when its representative window changed.
+        public string Key;
         // WS_EX_APPWINDOW: the window asked the shell for its own taskbar /
         // switcher entry, so it is kept apart instead of being merged into the
         // entry of its exe. It represents itself and nothing else, so it can
@@ -577,7 +624,11 @@ namespace AltTabSwitcher
         static IntPtr _fgHwnd;
         static Logic.OverlayLayout _layout;
         static NativeMethods.RECT _panelRect;
+        static NativeMethods.RECT _work;    // work area of the monitor the overlay lives on
         static double _scale = 1.0;
+        // Polls for windows that disappeared while the overlay is up. Only
+        // runs during a session; see RefreshTick.
+        static System.Windows.Forms.Timer _refreshTimer;
 
         static void Log(string msg)
         {
@@ -674,6 +725,22 @@ namespace AltTabSwitcher
         }
 
         static string WindowExe(IntPtr hwnd)
+        {
+            // Memoised for the duration of one enumeration: the eligibility
+            // predicate and the caller both need it, and OpenProcess +
+            // QueryFullProcessImageName is the most expensive call in the
+            // whole hot path (it runs for every top-level window on every
+            // Alt+Tab). Cleared by EnumerateEntries.
+            string memo;
+            if (_exeMemo.TryGetValue(hwnd, out memo)) return memo;
+            string exe = WindowExeCore(hwnd);
+            _exeMemo[hwnd] = exe;
+            return exe;
+        }
+
+        static Dictionary<IntPtr, string> _exeMemo = new Dictionary<IntPtr, string>();
+
+        static string WindowExeCore(IntPtr hwnd)
         {
             uint pid;
             NativeMethods.GetWindowThreadProcessId(hwnd, out pid);
@@ -874,6 +941,25 @@ namespace AltTabSwitcher
             return (Icon)SystemIcons.Application.Clone();
         }
 
+        // Icons are cached per executable for the lifetime of the process.
+        // Fetching one costs up to two WM_GETICON round-trips into another
+        // process (100 ms timeout each), which is by far the slowest part of
+        // opening a cycle - and a rapid Alt+Tab back and forth re-opens one
+        // every time. The cache turns every cycle after the first into a
+        // dictionary lookup. Entries are owned by the cache, NEVER disposed
+        // by a session.
+        static Dictionary<string, Icon> _iconCache = new Dictionary<string, Icon>(StringComparer.OrdinalIgnoreCase);
+
+        static Icon CachedIcon(string exe, IntPtr hwnd)
+        {
+            if (string.IsNullOrEmpty(exe)) exe = "?";
+            Icon ic;
+            if (_iconCache.TryGetValue(exe, out ic) && ic != null) return ic;
+            ic = GetAppIcon(hwnd, exe);
+            _iconCache[exe] = ic;
+            return ic;
+        }
+
         // ================= state machine =================
         static void HandleAppMsg(int msg, IntPtr wparam)
         {
@@ -907,28 +993,13 @@ namespace AltTabSwitcher
             return 1.0;
         }
 
-        static void StartSession()
+        // One entry per application, in raw Z-order: grouped by exe, plus a
+        // dedicated entry for every WS_EX_APPWINDOW window. Shared by
+        // StartSession and the in-session refresh, so a refresh produces
+        // exactly the same entries and can diff them against the running list.
+        static List<AppEntry> EnumerateEntries()
         {
-            IntPtr fgRaw = NativeMethods.GetForegroundWindow();
-            if (fgRaw == IntPtr.Zero) { Log("start aborted: no foreground window"); return; }
-            string fgExe = WindowExe(fgRaw);
-            if (fgExe == null)
-            {
-                Log("start aborted: no exe for fg 0x" + fgRaw.ToInt64().ToString("X")
-                    + " [" + ClassNameOf(fgRaw) + "] \"" + GetWindowTitle(fgRaw) + "\"");
-                return;
-            }
-            // Normalise the foreground window onto the one that represents it in
-            // the cycle: a UWP app reports its CoreWindow (which the cycle
-            // predicate keeps out of the list) and a minimized group reports
-            // its owned popup. Matching on the raw handle alone fails in both.
-            IntPtr fg = RepresentativeOf(fgRaw);
-            if (fg == IntPtr.Zero || !NativeMethods.IsWindowVisible(fg)) fg = fgRaw;
-            _fgHwnd = fg;
-            Log("fg 0x" + fgRaw.ToInt64().ToString("X") + " [" + ClassNameOf(fgRaw) + "] \""
-                + GetWindowTitle(fgRaw) + "\" -> repr 0x" + fg.ToInt64().ToString("X")
-                + " exe=" + Path.GetFileName(fgExe));
-
+            _exeMemo.Clear();
             var order = new List<AppEntry>();
             var byExe = new Dictionary<string, AppEntry>();
             int rank = 0;
@@ -969,6 +1040,7 @@ namespace AltTabSwitcher
                     e = new AppEntry
                     {
                         Exe = exe,
+                        Key = key,
                         ReprHwnd = hwnd,
                         Rank = myRank,
                         OwnEntry = ownEntry,
@@ -990,6 +1062,32 @@ namespace AltTabSwitcher
                 }
                 return true;
             }, IntPtr.Zero);
+            return order;
+        }
+
+        static void StartSession()
+        {
+            IntPtr fgRaw = NativeMethods.GetForegroundWindow();
+            if (fgRaw == IntPtr.Zero) { Log("start aborted: no foreground window"); return; }
+            string fgExe = WindowExe(fgRaw);
+            if (fgExe == null)
+            {
+                Log("start aborted: no exe for fg 0x" + fgRaw.ToInt64().ToString("X")
+                    + " [" + ClassNameOf(fgRaw) + "] \"" + GetWindowTitle(fgRaw) + "\"");
+                return;
+            }
+            // Normalise the foreground window onto the one that represents it in
+            // the cycle: a UWP app reports its CoreWindow (which the cycle
+            // predicate keeps out of the list) and a minimized group reports
+            // its owned popup. Matching on the raw handle alone fails in both.
+            IntPtr fg = RepresentativeOf(fgRaw);
+            if (fg == IntPtr.Zero || !NativeMethods.IsWindowVisible(fg)) fg = fgRaw;
+            _fgHwnd = fg;
+            Log("fg 0x" + fgRaw.ToInt64().ToString("X") + " [" + ClassNameOf(fgRaw) + "] \""
+                + GetWindowTitle(fgRaw) + "\" -> repr 0x" + fg.ToInt64().ToString("X")
+                + " exe=" + Path.GetFileName(fgExe));
+
+            var order = EnumerateEntries();
             if (order.Count < 2)
             {
                 Log("start aborted: only " + order.Count + " app(s) in cycle");
@@ -998,6 +1096,7 @@ namespace AltTabSwitcher
 
             NativeMethods.RECT work;
             _scale = MonitorScale(fg, out work);
+            _work = work;
             Logic.ComputeLayout(work, order.Count, _scale, ref _layout);
 
             // Exactly one entry is pinned as "current": first the one that *is*
@@ -1042,12 +1141,13 @@ namespace AltTabSwitcher
                    .Append('@').Append(e.Rank).Append(e.Topmost ? "*" : "");
             Log(sb2.ToString());
 
-            foreach (var e in _apps) e.Icon = GetAppIcon(e.ReprHwnd, e.Exe);
+            foreach (var e in _apps) e.Icon = CachedIcon(e.Exe, e.ReprHwnd);
 
             ShowPanel();
             RegisterThumbnails();
             RenderChrome();
             InstallMouseHook();
+            if (_refreshTimer != null) _refreshTimer.Start();
 
             _session = true;
             Log("session start, apps=" + _apps.Count + " scale=" + _scale.ToString("0.##")
@@ -1057,7 +1157,11 @@ namespace AltTabSwitcher
         static void ShowPanel()
         {
             _panel.BackColor = PanelFillC(LightTheme());
-            NativeMethods.SetWindowPos(_panel.Handle, IntPtr.Zero, _layout.panelX, _layout.panelY, _layout.panelW, _layout.panelH, 0x0040 /*SWP_SHOWWINDOW*/);
+            // SWP_NOACTIVATE: the panel must never take the foreground, or a
+            // later Commit would be handing focus back from one of our own
+            // windows instead of from the app the user started at.
+            NativeMethods.SetWindowPos(_panel.Handle, IntPtr.Zero, _layout.panelX, _layout.panelY, _layout.panelW, _layout.panelH,
+                                       0x0040 /*SWP_SHOWWINDOW*/ | 0x0010 /*SWP_NOACTIVATE*/);
             IntPtr rgn = NativeMethods.CreateRoundRectRgn(0, 0, _layout.panelW + 1, _layout.panelH + 1, 2 * Logic.Scaled(_scale, 8), 2 * Logic.Scaled(_scale, 8));
             if (rgn != IntPtr.Zero)
             {
@@ -1087,13 +1191,27 @@ namespace AltTabSwitcher
                 NativeMethods.RECT tile = Logic.TileRect(ref _layout, slot);
                 NativeMethods.RECT pv = Logic.PreviewRect(ref _layout, tile);
                 app.Thumb = IntPtr.Zero;
-                // minimized and cloaked (suspended) windows have no DWM
-                // thumbnail content; the paint path shows a large icon instead
-                if (NativeMethods.IsIconic(app.ReprHwnd) || IsCloaked(app.ReprHwnd)) continue;
+                // Only cloaked windows are skipped (parked on another virtual
+                // desktop, or hidden by the app itself: no DWM content at
+                // all) - the paint path draws a large icon for those.
+                //
+                // Minimized windows are NOT skipped any more. DWM keeps their
+                // last composed content and reports the restored source size,
+                // so they thumbnail just like any other window; skipping them
+                // is what left most tiles blank on a machine where most
+                // windows sit minimized.
+                if (IsCloaked(app.ReprHwnd))
+                {
+                    Log("  thumb: no content (cloaked) for 0x" + app.ReprHwnd.ToInt64().ToString("X"));
+                    continue;
+                }
                 IntPtr tid;
                 if (NativeMethods.DwmRegisterThumbnail(_panel.Handle, app.ReprHwnd, out tid) != 0 || tid == IntPtr.Zero)
+                {
+                    Log("  thumb: DwmRegisterThumbnail failed for 0x" + app.ReprHwnd.ToInt64().ToString("X")
+                        + " [" + ClassNameOf(app.ReprHwnd) + "]");
                     continue;
-                app.Thumb = tid;
+                }
                 _thumbs.Add(tid);
 
                 NativeMethods.RECT client = new NativeMethods.RECT();
@@ -1109,6 +1227,17 @@ namespace AltTabSwitcher
                 {
                     srcSize.cx = 0; srcSize.cy = 0;
                 }
+
+                if (srcSize.cx <= 0 || srcSize.cy <= 0)
+                {
+                    // Nothing to show: drop the thumbnail and let the paint
+                    // path fall back to the icon rather than stretching a
+                    // degenerate source over the whole tile.
+                    NativeMethods.DwmUnregisterThumbnail(tid);
+                    _thumbs.RemoveAt(_thumbs.Count - 1);
+                    continue;
+                }
+                app.Thumb = tid;
 
                 NativeMethods.RECT avail = new NativeMethods.RECT { Left = 0, Top = 0, Right = srcSize.cx, Bottom = srcSize.cy };
                 if (clientOnly)
@@ -1137,6 +1266,20 @@ namespace AltTabSwitcher
         {
             foreach (var t in _thumbs) { try { NativeMethods.DwmUnregisterThumbnail(t); } catch { } }
             _thumbs.Clear();
+            // Keep the entries in sync: RenderChrome decides between a live
+            // thumbnail and the icon fallback by looking at app.Thumb.
+            foreach (var e in _apps) e.Thumb = IntPtr.Zero;
+        }
+
+        // Take the overlay off screen (thumbnails included) without touching
+        // the entry list. Called by EndSession and - importantly - by
+        // ForceForeground as soon as a switch needs more than the fast path,
+        // so a slow activation is never something the user has to watch.
+        static void HideOverlay()
+        {
+            UnregisterThumbnails();
+            if (_panel != null && _panel.IsHandleCreated) _panel.Hide();
+            if (_chrome != null && _chrome.IsHandleCreated) _chrome.Hide();
         }
 
         static void Commit()
@@ -1231,16 +1374,102 @@ namespace AltTabSwitcher
             // Reentrancy guard first: the watchdog timer must not re-enter
             // Commit/Cancel while we tear down.
             _session = false;
+            if (_refreshTimer != null) _refreshTimer.Stop();
             UninstallMouseHook();
-            UnregisterThumbnails();
-            _panel.Hide();
-            _chrome.Hide();
+            HideOverlay();
             foreach (var e in _apps)
             {
-                if (e.Icon != null) e.Icon.Dispose();
+                // Icons are owned by the per-exe cache, NOT by the session:
+                // they survive so the next Alt+Tab does not pay for another
+                // WM_GETICON round-trip into every other process.
                 e.Icon = null;
             }
             _apps.Clear();
+        }
+
+        // Give up on the cycle without switching anywhere: used when the
+        // refresh finds there is nothing left to switch to.
+        static void AbortSession()
+        {
+            _session = false;
+            EndSession();
+            Log("session aborted: no windows left");
+        }
+
+        // ================= live refresh =================
+        // The cycle is a snapshot, but the desktop does not stop: a window
+        // can be closed (or hidden) while the overlay is up, and the bar has
+        // to follow. The check itself is deliberately cheap - a couple of
+        // user32 queries per entry - and the expensive part (re-enumerate,
+        // relayout, re-register thumbnails, repaint) only runs when something
+        // actually changed, which is rare.
+        static void RefreshTick()
+        {
+            if (!_session || _committing) return;
+            for (int i = 0; i < _apps.Count; i++)
+            {
+                IntPtr h = _apps[i].ReprHwnd;
+                if (!NativeMethods.IsWindow(h) || !NativeMethods.IsWindowVisible(h) || IsCloaked(h))
+                {
+                    Log("refresh: entry \"" + _apps[i].Title + "\" is gone");
+                    RefreshEntries();
+                    return;
+                }
+            }
+        }
+
+        static void RefreshEntries()
+        {
+            if (_committing) return;
+            var fresh = EnumerateEntries();
+            if (fresh.Count == 0) { AbortSession(); return; }
+
+            int oldIndex = _index >= 0 && _index < _apps.Count ? _index : 0;
+            string selKey = _index >= 0 && _index < _apps.Count ? _apps[_index].Key : null;
+
+            // Surviving entries keep their slot: match the fresh snapshot
+            // against the running order by key, then append genuinely new
+            // entries at the end. Re-indexing from scratch would reshuffle
+            // the bar under the user's finger.
+            var byKey = new Dictionary<string, AppEntry>(StringComparer.Ordinal);
+            foreach (var f in fresh) byKey[f.Key] = f;
+
+            var merged = new List<AppEntry>(fresh.Count);
+            foreach (var old in _apps)
+            {
+                AppEntry f;
+                if (!byKey.TryGetValue(old.Key, out f)) continue;
+                byKey.Remove(old.Key);
+                // Same exe => same icon; carry the cached one over instead of
+                // re-querying the window.
+                f.Icon = old.Icon;
+                old.Icon = null;
+                merged.Add(f);
+            }
+            foreach (var kv in byKey)
+            {
+                kv.Value.Icon = CachedIcon(kv.Value.Exe, kv.Value.ReprHwnd);
+                merged.Add(kv.Value);
+            }
+            // Entries left over in the old list died with their window; their
+            // icons belong to the cache (never disposed by a session), so
+            // there is nothing to release here.
+            _apps = merged;
+            int idx = 0;
+            if (selKey != null)
+                for (int i = 0; i < _apps.Count; i++)
+                    if (_apps[i].Key == selKey) { idx = i; break; }
+            _index = idx;
+
+            Logic.ComputeLayout(_work, _apps.Count, _scale, ref _layout);
+            _pageStart = Logic.PageStartFor(_index, _apps.Count, _layout.pageSize);
+            ShowPanel();
+            UpdatePanelRect();
+            RegisterThumbnails();
+            RenderChrome();
+            Log("refresh: " + _apps.Count + " entries, index=" + _index
+                + ", panel=" + _layout.panelW + "x" + _layout.panelH
+                + " rows=" + _layout.rows + " cols=" + _layout.cols);
         }
 
         // Hand the foreground to hwnd.
@@ -1306,16 +1535,46 @@ namespace AltTabSwitcher
             if (!NativeMethods.IsWindow(hwnd)) return false;
             if (NativeMethods.IsIconic(hwnd)) NativeMethods.ShowWindow(hwnd, NativeMethods.SW_RESTORE);
 
+            // ---- fast path: no cross-thread call, no attach ----
+            // BringWindowToTop (it also pumps the queue - dropping it is what
+            // broke plain switching before), stake the input claim with F24,
+            // then SetForegroundWindow. Staking the claim is what authorises
+            // us, so AttachThreadInput is NOT needed here - and it is a
+            // synchronous cross-thread call that blocks until the *other*
+            // thread processes it. Explorer's window thread is exactly the
+            // kind that can be busy for hundreds of milliseconds, which is
+            // what left the overlay hanging on screen after Alt+Tab (and made
+            // rapid back-and-forth switching feel sticky).
+            NativeMethods.BringWindowToTop(hwnd);
+            Application.DoEvents();
+            StakeInputClaim();
+            NativeMethods.SetForegroundWindow(hwnd);
+            Application.DoEvents();
+            if (ForegroundIs(hwnd))
+            {
+                NativeMethods.SetFocus(hwnd);
+                Log("  force-fg 0x" + hwnd.ToInt64().ToString("X") + " via sfw-fast");
+                return true;
+            }
+
+            // ---- slow path ----
+            // The fast attempt failed, so this is going to take a few more
+            // round-trips. Get the overlay off the screen FIRST: the user is
+            // waiting on the switch, not on our window, and a bar that lingers
+            // for several hundred milliseconds reads as a hang.
+            HideOverlay();
+
             IntPtr fgRaw = NativeMethods.GetForegroundWindow();
             uint fgThread = fgRaw != IntPtr.Zero ? NativeMethods.GetWindowThreadProcessId(fgRaw, IntPtr.Zero) : 0;
             uint myThread = NativeMethods.GetCurrentThreadId();
             bool attached = fgThread != 0 && fgThread != myThread && NativeMethods.AttachThreadInput(myThread, fgThread, true);
             try
             {
-                Application.DoEvents();
-                NativeMethods.BringWindowToTop(hwnd);
                 string how = null;
-                for (int i = 0; i < 4 && !ForegroundIs(hwnd); i++)
+                // Bounded by attempts AND by wall clock: a wedged target
+                // thread must not be able to stall the switcher.
+                var sw = Stopwatch.StartNew();
+                for (int i = 0; i < 3 && !ForegroundIs(hwnd) && sw.ElapsedMilliseconds < 200; i++)
                 {
                     StakeInputClaim();
                     NativeMethods.SetForegroundWindow(hwnd);
@@ -1329,13 +1588,13 @@ namespace AltTabSwitcher
                 {
                     NativeMethods.SetFocus(hwnd);
                     Log("  force-fg 0x" + hwnd.ToInt64().ToString("X") + " via " + how
-                        + (attached ? " (attached)" : ""));
+                        + (attached ? " (attached)" : "") + " after " + sw.ElapsedMilliseconds + "ms");
                     return true;
                 }
                 IntPtr stuck = NativeMethods.GetForegroundWindow();
-                Log("  force-fg 0x" + hwnd.ToInt64().ToString("X") + " FAILED x4, fg stuck at 0x"
+                Log("  force-fg 0x" + hwnd.ToInt64().ToString("X") + " FAILED, fg stuck at 0x"
                     + stuck.ToInt64().ToString("X") + " [" + ClassNameOf(stuck) + "] \""
-                    + GetWindowTitle(stuck) + "\"");
+                    + GetWindowTitle(stuck) + "\" after " + sw.ElapsedMilliseconds + "ms");
                 return false;
             }
             catch { return false; }
@@ -1391,18 +1650,30 @@ namespace AltTabSwitcher
                         if (pw > 0 && ph > 0)
                         {
                             var pvF = new RectangleF(pv.Left, pv.Top, pw, ph);
-                            GraphicsPath hole = BottomRoundRect(pvF, _layout.radius);
                             using (var back = new SolidBrush(CardSolid(light)))
                             {
                                 g.SetClip(cardPath);
                                 g.FillRectangle(back, pv.Left, pv.Top, pw, ph);
                                 g.ResetClip();
                             }
-                            g.CompositingMode = CompositingMode.SourceCopy;
-                            using (var tr = new SolidBrush(Color.FromArgb(0, 0, 0, 0)))
-                                g.FillPath(tr, hole);
-                            g.CompositingMode = CompositingMode.SourceOver;
-                            hole.Dispose();
+                            if (app.Thumb != IntPtr.Zero)
+                            {
+                                // Punch the preview area transparent: the live
+                                // DWM thumbnail is hosted by the panel window
+                                // underneath and shows through the hole.
+                                GraphicsPath hole = BottomRoundRect(pvF, _layout.radius);
+                                g.CompositingMode = CompositingMode.SourceCopy;
+                                using (var tr = new SolidBrush(Color.FromArgb(0, 0, 0, 0)))
+                                    g.FillPath(tr, hole);
+                                g.CompositingMode = CompositingMode.SourceOver;
+                                hole.Dispose();
+                            }
+                            // No thumbnail: leave the card solid. Nothing is
+                            // drawn (in particular no oversized app icon) -
+                            // DWM supplies the window's last composed frame
+                            // even after it is minimized, so an empty tile
+                            // means DWM genuinely has no content, and a big
+                            // icon there only drew attention to the gap.
                         }
 
                         NativeMethods.RECT hdr = Logic.HeaderRect(ref _layout, tile);
@@ -1592,9 +1863,23 @@ namespace AltTabSwitcher
             return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
         }
 
+        // Hit-test rect of the overlay, in physical screen coordinates. The
+        // mouse hook compares against it; it has to follow a relayout (a
+        // window closing mid-cycle resizes the panel).
+        static void UpdatePanelRect()
+        {
+            _panelRect = new NativeMethods.RECT
+            {
+                Left = _layout.panelX,
+                Top = _layout.panelY,
+                Right = _layout.panelX + _layout.panelW,
+                Bottom = _layout.panelY + _layout.panelH
+            };
+        }
+
         static void InstallMouseHook()
         {
-            _panelRect = new NativeMethods.RECT { Left = _layout.panelX, Top = _layout.panelY, Right = _layout.panelX + _layout.panelW, Bottom = _layout.panelY + _layout.panelH };
+            UpdatePanelRect();
             if (_mouseHook == IntPtr.Zero)
                 _mouseHook = NativeMethods.SetWindowsHookEx(NativeMethods.WH_MOUSE_LL, _mouseHookProc, NativeMethods.GetModuleHandle(null), 0);
         }
@@ -1710,13 +1995,19 @@ namespace AltTabSwitcher
 
             // Watchdog: if the Alt release never arrives through the hook
             // (timeout, injection hiccup, focus race), commit anyway instead of
-            // leaving the overlay up and swallowing clicks forever.
-            var sessionWatchdog = new System.Windows.Forms.Timer { Interval = 100 };
+            // leaving the overlay up and swallowing clicks forever. Short
+            // interval: this timer is also the worst-case latency between the
+            // user releasing Alt and the overlay disappearing.
+            var sessionWatchdog = new System.Windows.Forms.Timer { Interval = 30 };
             sessionWatchdog.Tick += delegate
             {
                 if (_session && !AltDown()) Commit();
             };
             sessionWatchdog.Start();
+
+            // Live refresh: catches windows closed while the overlay is up.
+            _refreshTimer = new System.Windows.Forms.Timer { Interval = 120 };
+            _refreshTimer.Tick += delegate { RefreshTick(); };
 
             var exitTimer = new System.Windows.Forms.Timer { Interval = 200 };
             exitTimer.Tick += delegate

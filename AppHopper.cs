@@ -24,6 +24,14 @@ using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
+// Version resource: csc turns these into the PE's VS_VERSIONINFO (Explorer
+// "Properties -> Details") without any build.bat change. Bump once per
+// release - the tray tooltip and the startup log line read it back at
+// runtime via AppVersion, so this is the single place a version lives.
+[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.1")]
+
 namespace AppHopper
 {
     // ================= Win32 interop =================
@@ -634,6 +642,19 @@ namespace AppHopper
         // runs during a session; see RefreshTick.
         static System.Windows.Forms.Timer _refreshTimer;
 
+        // Product version shown to humans ("1.1.1"), read back from the
+        // [assembly: AssemblyInformationalVersion] attribute at the top of
+        // this file - one literal per release, consumed everywhere.
+        static readonly string AppVersion = InitVersion();
+
+        static string InitVersion()
+        {
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            var attr = Attribute.GetCustomAttribute(asm, typeof(System.Reflection.AssemblyInformationalVersionAttribute))
+                as System.Reflection.AssemblyInformationalVersionAttribute;
+            return attr != null ? attr.InformationalVersion : asm.GetName().Version.ToString(3);
+        }
+
         static void Log(string msg)
         {
             if (_log == null) return;
@@ -973,7 +994,12 @@ namespace AppHopper
                     // Logged here rather than in the hook callback (which
                     // must stay I/O-free): a received message proves the
                     // whole hook -> post -> dispatch chain.
-                    if (!_session) { Log("hotkey: alt+tab -> start"); StartSession(); }
+                    // !_committing: Commit's post-failure wait pumps messages
+                    // (Application.DoEvents) with _session already false - a
+                    // hotkey pressed in that window would otherwise start a
+                    // new session that the in-flight Commit's EndSession()
+                    // then tears right down.
+                    if (!_session && !_committing) { Log("hotkey: alt+tab -> start"); StartSession(); }
                     if (_session && !AltDown()) Commit();  // quick tap: Alt already released
                     break;
                 case NativeMethods.WM_APP_NEXT: if (_session) MoveIndex(1); break;
@@ -1321,6 +1347,7 @@ namespace AppHopper
                 // source would re-arm its foreground lock.
                 bool ok = ForceForeground(target);
                 if (!ok) ok = ForegroundIs(target);   // FF's verdict can lag the real foreground; trust the latter
+                if (!ok) ok = WaitForForegroundLanding(target);   // see below: fg==0 is a transition, not a failure
                 if (!ok)
                 {
                     IntPtr nowFg = NativeMethods.GetForegroundWindow();
@@ -1351,6 +1378,52 @@ namespace AppHopper
                     + " fgNow=0x" + now.ToInt64().ToString("X") + " [" + ClassNameOf(now) + "]");
             }
             finally { _committing = false; }
+        }
+
+        // fg == 0 after a failed activation is NOT "nobody holds the focus" -
+        // it is the system's mid-transition state while the SetForegroundWindow
+        // ForceForeground kicked off is still in flight. Measured on this
+        // machine (elevated probe against the LoL window): the transition
+        // completes 19-110ms after the call. The old code read fg==0 as
+        // "focus-dead" and immediately SetForegroundWindow'd the SOURCE back,
+        // actively canceling the activation it had just requested - which is
+        // the confirmed root cause of "switching TO the game needs a second
+        // Alt+Tab" (4/4 failures in the 2026-09-10 log, each ending in
+        // "commit fallback: restoring source" 1ms after force-fg FAILED).
+        //
+        // So: wait in bounded chunks (Sleep + DoEvents keeps the low-level
+        // hooks serviced) and re-check. If a foreign window instead ends up
+        // solidly holding the foreground (3 consecutive readings), the
+        // transition resolved elsewhere and waiting longer is pointless -
+        // leave it alone, exactly like the fallback below does.
+        static bool WaitForForegroundLanding(IntPtr target)
+        {
+            const int budgetMs = 300;
+            HideOverlay();   // no-op when FF's slow path already hid it; covers the IsWindow-false early-out path
+            var sw = Stopwatch.StartNew();
+            string lastFg = "0x0";
+            int foreignRun = 0;
+            while (sw.ElapsedMilliseconds < budgetMs)
+            {
+                System.Threading.Thread.Sleep(10);
+                Application.DoEvents();
+                IntPtr now = NativeMethods.GetForegroundWindow();
+                if (ForegroundIs(target))
+                {
+                    NativeMethods.SetFocus(target);
+                    Log("  commit: late landing of 0x" + target.ToInt64().ToString("X")
+                        + " after " + sw.ElapsedMilliseconds + "ms");
+                    return true;
+                }
+                if (now != IntPtr.Zero && !IsOwnWindow(now))
+                {
+                    lastFg = "0x" + now.ToInt64().ToString("X") + " [" + ClassNameOf(now) + "]";
+                    if (++foreignRun >= 3) break;   // ~30ms: another window solidly won the transition
+                }
+                else foreignRun = 0;
+            }
+            Log("  commit: no late landing within " + budgetMs + "ms, fg last seen at " + lastFg);
+            return false;
         }
 
         static void Cancel()
@@ -1571,14 +1644,25 @@ namespace AppHopper
             IntPtr fgRaw = NativeMethods.GetForegroundWindow();
             uint fgThread = fgRaw != IntPtr.Zero ? NativeMethods.GetWindowThreadProcessId(fgRaw, IntPtr.Zero) : 0;
             uint myThread = NativeMethods.GetCurrentThreadId();
+            // Mid-transition the foreground is 0 and there is no current owner
+            // to attach to - attach the TARGET's thread instead (the classic
+            // taskbar recipe). Skipping the attach entirely is what left the
+            // game switch with no weapon at all: the 2026-09-10 log shows the
+            // old code ran all three attempts against LoL without ever
+            // calling AttachThreadInput.
+            if (fgThread == 0) fgThread = NativeMethods.GetWindowThreadProcessId(hwnd, IntPtr.Zero);
             bool attached = fgThread != 0 && fgThread != myThread && NativeMethods.AttachThreadInput(myThread, fgThread, true);
             try
             {
                 string how = null;
                 // Bounded by attempts AND by wall clock: a wedged target
-                // thread must not be able to stall the switcher.
+                // thread must not be able to stall the switcher. The Sleep
+                // between attempts is load-bearing: activation of a busy
+                // window (a game restoring its swap chain) lands 20-110ms
+                // after the call, and with no sleep the whole loop finished
+                // in 6ms and declared failure while fg was still 0.
                 var sw = Stopwatch.StartNew();
-                for (int i = 0; i < 3 && !ForegroundIs(hwnd) && sw.ElapsedMilliseconds < 200; i++)
+                for (int i = 0; i < 8 && !ForegroundIs(hwnd) && sw.ElapsedMilliseconds < 200; i++)
                 {
                     StakeInputClaim();
                     NativeMethods.SetForegroundWindow(hwnd);
@@ -1587,7 +1671,9 @@ namespace AppHopper
                     NativeMethods.SwitchToThisWindow(hwnd, true);
                     Application.DoEvents();
                     if (ForegroundIs(hwnd)) { how = "sttw#" + (i + 1); break; }
+                    System.Threading.Thread.Sleep(15);
                 }
+                if (how == null && ForegroundIs(hwnd)) how = "settled";   // landed between attempts - the loop-top check ended the for
                 if (how != null)
                 {
                     NativeMethods.SetFocus(hwnd);
@@ -1938,7 +2024,12 @@ namespace AppHopper
 
             foreach (string a in args)
                 if (a == "--log")
+                {
                     _log = new StreamWriter(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "apphopper.log"), false);
+                    // First line of every log names the build, so a pasted log
+                    // is self-identifying.
+                    Log("AppHopper v" + AppVersion + " starting, pid " + Process.GetCurrentProcess().Id);
+                }
 
             NativeMethods.SetProcessDPIAware();
             Application.EnableVisualStyles();
@@ -1980,7 +2071,7 @@ namespace AppHopper
             var icon = new NotifyIcon();
             _trayIcon = MakeTrayIcon();
             icon.Icon = _trayIcon;
-            icon.Text = "AppHopper - one entry per app";
+            icon.Text = "AppHopper " + AppVersion + " - one entry per app";
             icon.ContextMenu = menu;
             icon.Visible = true;
 
